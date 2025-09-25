@@ -27,14 +27,27 @@ app.add_middleware(
     allow_methods=["*"], allow_headers=["*"],
 )
 
-# ---------- Paths ----------
+# # ---------- Paths ----------
+# BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# # IMPORTANT: honor env var (e.g., /data/album on Render). Do NOT overwrite it later.
+# ALBUM_DIR = os.getenv("ALBUM_DIR", os.path.join(BASE_DIR, "album"))
+# TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
+# STATIC_DIR = os.path.join(BASE_DIR, "static")
+# ALBUM_JSON = os.path.join(ALBUM_DIR, "album.json")
+# JOBS_JSON  = os.path.join(ALBUM_DIR, "jobs.json")   # simple persistent job store
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# IMPORTANT: honor env var (e.g., /data/album on Render). Do NOT overwrite it later.
-ALBUM_DIR = os.getenv("ALBUM_DIR", os.path.join(BASE_DIR, "album"))
+
+# Use persistent disk if ALBUM_DIR is set, otherwise default to local folder.
+ALBUM_DIR = os.getenv("ALBUM_DIR") or os.path.join(BASE_DIR, "album")
+
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
-STATIC_DIR = os.path.join(BASE_DIR, "static")
-ALBUM_JSON = os.path.join(ALBUM_DIR, "album.json")
-JOBS_JSON  = os.path.join(ALBUM_DIR, "jobs.json")   # simple persistent job store
+STATIC_DIR    = os.path.join(BASE_DIR, "static")
+ALBUM_JSON    = os.path.join(ALBUM_DIR, "album.json")
+JOBS_JSON     = os.path.join(ALBUM_DIR, "jobs.json")
+
+
+
 
 # Create dirs/files
 os.makedirs(STATIC_DIR, exist_ok=True)
