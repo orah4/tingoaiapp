@@ -1,13 +1,21 @@
 # app.py
-from fastapi import FastAPI, Form, Request, status, Response, UploadFile, File
-from fastapi.responses import JSONResponse, HTMLResponse
+from typing import Optional
+
+from fastapi import (
+    FastAPI, Form, Request, Response, UploadFile, File,
+    APIRouter, Depends, Header, Query, HTTPException, status
+)
+from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
+
 from dotenv import load_dotenv
 from openai import OpenAI
+
 import requests
-import os, json, uuid, datetime, logging, traceback, mimetypes, time, shutil
+import os, json, uuid, datetime, logging, traceback, mimetypes, shutil
+
 
 # ---------- Boot ----------
 load_dotenv()
@@ -27,18 +35,10 @@ app.add_middleware(
     allow_methods=["*"], allow_headers=["*"],
 )
 
-# # ---------- Paths ----------
-# BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# # IMPORTANT: honor env var (e.g., /data/album on Render). Do NOT overwrite it later.
-# ALBUM_DIR = os.getenv("ALBUM_DIR", os.path.join(BASE_DIR, "album"))
-# TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
-# STATIC_DIR = os.path.join(BASE_DIR, "static")
-# ALBUM_JSON = os.path.join(ALBUM_DIR, "album.json")
-# JOBS_JSON  = os.path.join(ALBUM_DIR, "jobs.json")   # simple persistent job store
-
+# ---------- Paths ----------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Use persistent disk if ALBUM_DIR is set, otherwise default to local folder.
+# Use persistent disk if ALBUM_DIR is set (Render disk), else local folder.
 ALBUM_DIR = os.getenv("ALBUM_DIR") or os.path.join(BASE_DIR, "album")
 
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
@@ -46,10 +46,42 @@ STATIC_DIR    = os.path.join(BASE_DIR, "static")
 ALBUM_JSON    = os.path.join(ALBUM_DIR, "album.json")
 JOBS_JSON     = os.path.join(ALBUM_DIR, "jobs.json")
 
+# -------- Public API keys (env OR secret file) ----------
+def _load_api_keys() -> set[str]:
+    """
+    Reads PUBLIC_API_KEYS from either:
+      - env var PUBLIC_API_KEYS="k1,k2"
+      - Render Secret File /etc/secrets/PUBLIC_API_KEYS (one or many keys)
+    Accepts comma- or newline-separated lists.
+    """
+    keys_str = (os.getenv("PUBLIC_API_KEYS") or "").strip()
+    if not keys_str:
+        try:
+            with open("/etc/secrets/PUBLIC_API_KEYS", "r", encoding="utf-8") as fh:
+                keys_str = fh.read().strip()
+        except Exception:
+            keys_str = ""
+    parts: list[str] = []
+    for line in keys_str.replace("\r", "\n").split("\n"):
+        parts.extend([p.strip() for p in line.split(",")])
+    return {p for p in parts if p}
+
+API_KEYS = _load_api_keys()
+
+def require_api_key(
+    x_api_key: Optional[str] = Header(None),
+    api_key: Optional[str] = Query(None),
+):
+    token = (x_api_key or api_key or "").strip()
+    if not API_KEYS:
+        # safer to block if keys were not configured
+        raise HTTPException(status_code=503, detail="API not configured (no PUBLIC_API_KEYS).")
+    if token not in API_KEYS:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key.")
+    return token
 
 
-
-# Create dirs/files
+# ---------- FS bootstrap ----------
 os.makedirs(STATIC_DIR, exist_ok=True)
 os.makedirs(TEMPLATES_DIR, exist_ok=True)
 os.makedirs(ALBUM_DIR, exist_ok=True)
@@ -58,7 +90,7 @@ for f, init in [(ALBUM_JSON, []), (JOBS_JSON, {})]:
         with open(f, "w", encoding="utf-8") as fh:
             json.dump(init, fh, indent=2)
 
-# Static mounts (serve saved audio files under /album/<filename>)
+# Static mounts (/album serves saved audio files)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.mount("/album", StaticFiles(directory=ALBUM_DIR), name="album")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
@@ -67,13 +99,12 @@ templates = Jinja2Templates(directory=TEMPLATES_DIR)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("harmonix")
 
-# ---------- Config ----------
+# ---------- External model config ----------
 BARK_VERSION = "b76242b40d67c76ab6742e987628a2a9ac019e11d56ab96c4e91ce03b79b2787"
 REPLICATE_HEADERS = {
     "Authorization": f"Token {REPLICATE_API_TOKEN}",
     "Content-Type": "application/json",
 }
-POLL_SLEEP_SEC = 2.5
 ALLOWED_UPLOAD_CTYPES = {
     "audio/wav": "wav", "audio/x-wav": "wav",
     "audio/mpeg": "mp3", "audio/mp3": "mp3",
@@ -84,6 +115,7 @@ ALLOWED_UPLOAD_CTYPES = {
 
 # ---------- Helpers ----------
 BANNED_STYLE_WORDS = [" by ", " in the style of ", " sound like ", " like ", " as ", " ft. ", " featuring "]
+
 def sanitize_prompt(p: str) -> str:
     s = " " + (p or "").strip().lower() + " "
     for w in BANNED_STYLE_WORDS:
@@ -158,7 +190,7 @@ def generate_lyrics(prompt: str) -> str:
         logger.error("OpenAI error: %s\n%s", e, traceback.format_exc())
         return "Rhythms rise under Lagos skies, heartbeats dancing in the night; we sing our dreams till morning light."
 
-# ---------- Bark prediction create/poll ----------
+# ---------- Replicate create/poll ----------
 def replicate_create_prediction(prompt_text: str) -> str:
     create_url = "https://api.replicate.com/v1/predictions"
     payload = {
@@ -232,7 +264,7 @@ def stream_import_to_album(url: str, max_mb: int = 64) -> str:
                 f.write(chunk)
     return path
 
-# ---------- Routes ----------
+# ---------- Basic pages & album listing ----------
 @app.get("/")
 async def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
@@ -252,10 +284,7 @@ async def get_album():
 # ---- Storage viewers ----
 @app.get("/api/storage")
 async def api_storage():
-    return {
-        "album_dir": ALBUM_DIR,
-        "files": list_album_files()
-    }
+    return {"album_dir": ALBUM_DIR, "files": list_album_files()}
 
 @app.get("/storage", response_class=HTMLResponse)
 async def storage_view():
@@ -291,7 +320,31 @@ async def storage_view():
     """
     return HTMLResponse(html)
 
-# ---- Text-to-song: create job quickly; client polls /job/{id} ----
+# ---------- Job helpers ----------
+def start_generation_job(prompt: str, title: Optional[str] = None, duration: int = 0) -> dict:
+    """Starts a Replicate job and persists it in jobs.json. Returns the job dict."""
+    lyrics = generate_lyrics(prompt)
+    logger.info("Lyrics OK: %s", lyrics[:80])
+
+    pred_id = replicate_create_prediction(lyrics)
+    job_id = uuid.uuid4().hex
+    created_at = datetime.datetime.utcnow().isoformat() + "Z"
+
+    jobs = jobs_read()
+    job = {
+        "id": job_id,
+        "pred_id": pred_id,
+        "status": "starting",
+        "lyrics": lyrics,
+        "title": title or sanitize_prompt(prompt)[:40],
+        "created_at": created_at,
+        "saved": False,
+    }
+    jobs[job_id] = job
+    jobs_write(jobs)
+    return job
+
+# ---------- UI routes for generation ----------
 @app.post("/generate-music")
 async def generate_music(
     prompt: str = Form(...),
@@ -299,25 +352,11 @@ async def generate_music(
     duration: int = Form(0),
 ):
     try:
-        lyrics = generate_lyrics(prompt)
-        logger.info("Lyrics OK: %s", lyrics[:80])
-
-        pred_id = replicate_create_prediction(lyrics)
-        job_id = uuid.uuid4().hex
-        created_at = datetime.datetime.utcnow().isoformat() + "Z"
-        jobs = jobs_read()
-        jobs[job_id] = {
-            "id": job_id,
-            "pred_id": pred_id,
-            "status": "starting",
-            "lyrics": lyrics,
-            "title": title or sanitize_prompt(prompt)[:40],
-            "created_at": created_at,
-            "saved": False,
-        }
-        jobs_write(jobs)
-        return JSONResponse(status_code=status.HTTP_202_ACCEPTED,
-                            content={"message": "Job created", "job": jobs[job_id]})
+        job = start_generation_job(prompt, title, duration)
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content={"message": "Job created", "job": job}
+        )
     except Exception as e:
         logger.error("Create job error: %s\n%s", e, traceback.format_exc())
         return JSONResponse(status_code=500, content={"error": "create_failed", "detail": str(e)})
@@ -382,7 +421,7 @@ async def get_job(job_id: str):
     else:
         return {"job": job}
 
-# ---- Upload local audio into album ----
+# ---------- Album utilities (UI + API reuse) ----------
 @app.post("/api/album/upload")
 async def api_album_upload(
     title: str = Form(None),
@@ -423,6 +462,174 @@ async def api_album_upload(
     except Exception as e:
         logger.error("Upload error: %s\n%s", e, traceback.format_exc())
         return JSONResponse(status_code=500, content={"error": "upload_failed", "detail": str(e)})
+
+@app.post("/api/album/import_url")
+async def api_album_import_url(request: Request):
+    """Download a direct audio URL into the album."""
+    try:
+        body = await request.json()
+        url = (body.get("url") or "").strip()
+        title = body.get("title") or "Imported Track"
+        artist = body.get("artist") or ""
+
+        if not url:
+            return JSONResponse(status_code=400, content={"error": "url_required"})
+
+        local_path = stream_import_to_album(url, max_mb=64)
+        public_url = f"/album/{os.path.basename(local_path)}"
+        entry = {
+            "id": uuid.uuid4().hex,
+            "title": title,
+            "artist": artist,
+            "lyrics": "",
+            "file": os.path.basename(local_path),
+            "url": public_url,
+            "created_at": datetime.datetime.utcnow().isoformat() + "Z",
+            "source": "import_url",
+            "origin_url": url,
+        }
+        append_to_album(entry)
+        return {"track": entry}
+    except Exception as e:
+        logger.error("Import URL error: %s\n%s", e, traceback.format_exc())
+        return JSONResponse(status_code=500, content={"error": "import_failed", "detail": str(e)})
+
+@app.delete("/api/album/{track_id}")
+async def api_album_delete(track_id: str):
+    """Delete a track from album (and the local file if present)."""
+    try:
+        data = album_read()
+        idx = next((i for i, t in enumerate(data) if t.get("id") == track_id), None)
+        if idx is None:
+            return JSONResponse(status_code=404, content={"error": "not_found"})
+        track = data.pop(idx)
+        fn = track.get("file")
+        if fn:
+            path = os.path.join(ALBUM_DIR, fn)
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
+        album_write(data)
+        return {"deleted": True}
+    except Exception as e:
+        logger.error("Delete error: %s\n%s", e, traceback.format_exc())
+        return JSONResponse(status_code=500, content={"error": "delete_failed", "detail": str(e)})
+
+# ---------------- Public API v1 (API-key protected) ----------------
+api = APIRouter(prefix="/api/v1", dependencies=[Depends(require_api_key)], tags=["Public API"])
+
+@api.get("/health")
+def api_health():
+    return {"ok": True, "time": datetime.datetime.utcnow().isoformat() + "Z"}
+
+@api.post("/generate")
+def api_generate(
+    prompt: str = Form(...),
+    title: Optional[str] = Form(None),
+    duration: int = Form(0)
+):
+    job = start_generation_job(prompt, title, duration)
+    return {"job": job, "poll_url": f"/api/v1/jobs/{job['id']}"}
+
+@api.get("/jobs/{job_id}")
+def api_job(job_id: str):
+    jobs = jobs_read()
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="not_found")
+
+    if job.get("status") == "succeeded" and job.get("saved") and job.get("track"):
+        return {"job": job, "track": job["track"]}
+
+    pred = replicate_get_prediction(job["pred_id"])
+    status_s = pred.get("status", "unknown")
+    if status_s in ("poll_timeout", "poll_error"):
+        return {"job": job, "note": status_s}
+
+    job["status"] = status_s
+    job["updated_at"] = datetime.datetime.utcnow().isoformat() + "Z"
+
+    if status_s == "succeeded" and not job.get("saved"):
+        output = pred.get("output")
+        url = None
+        if isinstance(output, list) and output:
+            url = output[0]
+        elif isinstance(output, dict):
+            url = output.get("audio_out")
+        if not url:
+            job["status"] = "failed"
+            jobs[job_id] = job
+            jobs_write(jobs)
+            raise HTTPException(status_code=500, detail="no_audio_url")
+
+        local_path = download_to_album(url)
+        public_url = f"/album/{os.path.basename(local_path)}"
+        track_entry = {
+            "id": uuid.uuid4().hex,
+            "title": job["title"],
+            "artist": "",
+            "lyrics": job["lyrics"],
+            "file": os.path.basename(local_path),
+            "url": public_url,
+            "created_at": datetime.datetime.utcnow().isoformat() + "Z",
+            "source": "bark",
+        }
+        append_to_album(track_entry)
+        job["track"] = track_entry
+        job["saved"] = True
+
+    jobs[job_id] = job
+    jobs_write(jobs)
+
+    if job["status"] == "succeeded" and job.get("track"):
+        return {"job": job, "track": job["track"]}
+    elif job["status"] in ("failed", "canceled"):
+        raise HTTPException(status_code=500, detail=job.get("error", job["status"]))
+    else:
+        return {"job": job}
+
+@api.get("/tracks")
+def api_tracks():
+    return list(reversed(album_read()))
+
+@api.get("/tracks/{track_id}")
+def api_track(track_id: str):
+    data = album_read()
+    track = next((t for t in data if t.get("id") == track_id), None)
+    if not track:
+        raise HTTPException(status_code=404, detail="not_found")
+    return track
+
+@api.get("/tracks/{track_id}/download")
+def api_track_download(track_id: str):
+    data = album_read()
+    track = next((t for t in data if t.get("id") == track_id), None)
+    if not track:
+        raise HTTPException(status_code=404, detail="not_found")
+    return RedirectResponse(url=track["url"])
+
+@api.post("/upload")
+def api_upload_public(
+    title: Optional[str] = Form(None),
+    artist: Optional[str] = Form(None),
+    file: UploadFile = File(...)
+):
+    return api_album_upload(title=title, artist=artist, file=file)
+
+@api.post("/import")
+async def api_import_public(request: Request):
+    return await api_album_import_url(request)
+
+@api.delete("/tracks/{track_id}")
+def api_delete_public(track_id: str):
+    return api_album_delete(track_id)
+
+# Mount the router
+app.include_router(api)
+
+
 
 # ---- Import from direct audio URL (we download & save) ----
 @app.post("/api/album/import_url")
