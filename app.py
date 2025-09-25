@@ -1,6 +1,6 @@
 # app.py
 from fastapi import FastAPI, Form, Request, status, Response, UploadFile, File
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,9 +14,9 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
 if not OPENAI_API_KEY:
-    raise RuntimeError("OPENAI_API_KEY missing. Add it to .env")
+    raise RuntimeError("OPENAI_API_KEY missing. Add it to .env or Render env")
 if not REPLICATE_API_TOKEN:
-    raise RuntimeError("REPLICATE_API_TOKEN missing. Add it to .env")
+    raise RuntimeError("REPLICATE_API_TOKEN missing. Add it to .env or Render env")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -29,14 +29,14 @@ app.add_middleware(
 
 # ---------- Paths ----------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# Allow overriding album path via env var (for Render persistent disk)
+# IMPORTANT: honor env var (e.g., /data/album on Render). Do NOT overwrite it later.
 ALBUM_DIR = os.getenv("ALBUM_DIR", os.path.join(BASE_DIR, "album"))
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
-ALBUM_DIR = os.path.join(BASE_DIR, "album")
 ALBUM_JSON = os.path.join(ALBUM_DIR, "album.json")
-JOBS_JSON = os.path.join(ALBUM_DIR, "jobs.json")  # simple persistent job store
+JOBS_JSON  = os.path.join(ALBUM_DIR, "jobs.json")   # simple persistent job store
 
+# Create dirs/files
 os.makedirs(STATIC_DIR, exist_ok=True)
 os.makedirs(TEMPLATES_DIR, exist_ok=True)
 os.makedirs(ALBUM_DIR, exist_ok=True)
@@ -45,6 +45,7 @@ for f, init in [(ALBUM_JSON, []), (JOBS_JSON, {})]:
         with open(f, "w", encoding="utf-8") as fh:
             json.dump(init, fh, indent=2)
 
+# Static mounts (serve saved audio files under /album/<filename>)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.mount("/album", StaticFiles(directory=ALBUM_DIR), name="album")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
@@ -100,6 +101,24 @@ def jobs_read() -> dict:
 def jobs_write(j: dict) -> None:
     with open(JOBS_JSON, "w", encoding="utf-8") as f:
         json.dump(j, f, indent=2)
+
+def list_album_files() -> list:
+    items = []
+    try:
+        for name in sorted(os.listdir(ALBUM_DIR)):
+            path = os.path.join(ALBUM_DIR, name)
+            if os.path.isfile(path):
+                st = os.stat(path)
+                items.append({
+                    "name": name,
+                    "url": f"/album/{name}",
+                    "size_bytes": st.st_size,
+                    "size_mb": round(st.st_size / (1024*1024), 3),
+                    "modified": datetime.datetime.utcfromtimestamp(st.st_mtime).isoformat() + "Z",
+                })
+    except Exception as e:
+        logger.error("List storage error: %s", e)
+    return items
 
 # ---------- Lyrics ----------
 def generate_lyrics(prompt: str) -> str:
@@ -165,12 +184,10 @@ def infer_ext_from_headers_or_url(ctype: str, url: str) -> str:
     guessed = mimetypes.guess_extension(ctype)
     if guessed:
         return guessed.replace(".", "")
-    # fallback: take from url
     last = url.split("?")[0].split("#")[0].split(".")[-1].lower()
     return last if last and len(last) <= 5 else "wav"
 
 def download_to_album(url: str) -> str:
-    """Used by AI generation (small files)."""
     r = requests.get(url, timeout=300)
     if r.status_code != 200 or not r.content:
         raise RuntimeError(f"Download failed: {r.status_code}")
@@ -182,7 +199,6 @@ def download_to_album(url: str) -> str:
     return path
 
 def stream_import_to_album(url: str, max_mb: int = 64) -> str:
-    """Import larger direct audio URLs safely with streaming and size cap."""
     with requests.get(url, stream=True, timeout=60) as r:
         if r.status_code != 200:
             raise RuntimeError(f"Import GET failed: {r.status_code}")
@@ -212,9 +228,55 @@ async def index(request: Request):
 async def favicon():
     return Response(status_code=204)
 
+@app.get("/healthz")
+async def healthz():
+    return {"ok": True, "time": datetime.datetime.utcnow().isoformat() + "Z", "album_dir": ALBUM_DIR}
+
 @app.get("/api/album")
 async def get_album():
     return list(reversed(album_read()))  # newest first
+
+# ---- Storage viewers ----
+@app.get("/api/storage")
+async def api_storage():
+    return {
+        "album_dir": ALBUM_DIR,
+        "files": list_album_files()
+    }
+
+@app.get("/storage", response_class=HTMLResponse)
+async def storage_view():
+    files = list_album_files()
+    html_rows = []
+    for f in files:
+        html_rows.append(
+            f"<tr><td><a href='{f['url']}'>{f['name']}</a></td>"
+            f"<td style='text-align:right'>{f['size_mb']}</td>"
+            f"<td>{f['modified']}</td></tr>"
+        )
+    html = f"""
+    <html>
+    <head>
+      <title>Album Storage</title>
+      <style>
+        body {{ font-family: Arial, sans-serif; padding: 20px; background:#111; color:#eee; }}
+        table {{ border-collapse: collapse; width:100%; }}
+        th,td {{ border:1px solid #333; padding:8px; }}
+        a {{ color:#6cf; text-decoration:none; }}
+      </style>
+    </head>
+    <body>
+      <h2>Album Storage</h2>
+      <p><b>Album dir:</b> {ALBUM_DIR}</p>
+      <table>
+        <thead><tr><th>File</th><th style='text-align:right'>Size (MB)</th><th>Modified (UTC)</th></tr></thead>
+        <tbody>{''.join(html_rows) if html_rows else "<tr><td colspan=3>(empty)</td></tr>"}</tbody>
+      </table>
+      <p>Tip: Direct links above are served from <code>/album/…</code></p>
+    </body>
+    </html>
+    """
+    return HTMLResponse(html)
 
 # ---- Text-to-song: create job quickly; client polls /job/{id} ----
 @app.post("/generate-music")
@@ -283,7 +345,7 @@ async def get_job(job_id: str):
             track_entry = {
                 "id": uuid.uuid4().hex,
                 "title": job["title"],
-                "artist": "",                 # AI track has no artist
+                "artist": "",
                 "lyrics": job["lyrics"],
                 "file": os.path.basename(local_path),
                 "url": public_url,
@@ -307,7 +369,7 @@ async def get_job(job_id: str):
     else:
         return {"job": job}
 
-# ---- NEW: Upload local audio into album ----
+# ---- Upload local audio into album ----
 @app.post("/api/album/upload")
 async def api_album_upload(
     title: str = Form(None),
@@ -321,7 +383,6 @@ async def api_album_upload(
 
         ext = ALLOWED_UPLOAD_CTYPES.get(ctype)
         if not ext:
-            # fall back to filename or MIME guess
             name_ext = os.path.splitext(file.filename or "")[1].lower().replace(".", "")
             if name_ext in ("mp3", "wav", "ogg", "webm", "m4a", "aac"):
                 ext = name_ext
@@ -350,7 +411,7 @@ async def api_album_upload(
         logger.error("Upload error: %s\n%s", e, traceback.format_exc())
         return JSONResponse(status_code=500, content={"error": "upload_failed", "detail": str(e)})
 
-# ---- NEW: Import from direct audio URL (we download & save) ----
+# ---- Import from direct audio URL (we download & save) ----
 @app.post("/api/album/import_url")
 async def api_album_import_url(request: Request):
     """
@@ -385,7 +446,7 @@ async def api_album_import_url(request: Request):
         logger.error("Import URL error: %s\n%s", e, traceback.format_exc())
         return JSONResponse(status_code=500, content={"error": "import_failed", "detail": str(e)})
 
-# ---- NEW: Delete a track from album (and file if local) ----
+# ---- Delete a track from album (and file if local) ----
 @app.delete("/api/album/{track_id}")
 async def api_album_delete(track_id: str):
     try:
@@ -394,7 +455,6 @@ async def api_album_delete(track_id: str):
         if idx is None:
             return JSONResponse(status_code=404, content={"error": "not_found"})
         track = data.pop(idx)
-        # delete local file if present
         fn = track.get("file")
         if fn:
             path = os.path.join(ALBUM_DIR, fn)
