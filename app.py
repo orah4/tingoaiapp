@@ -5,7 +5,10 @@ from fastapi import (
     FastAPI, Form, Request, Response, UploadFile, File,
     APIRouter, Depends, Header, Query, HTTPException, status
 )
-from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import (
+    JSONResponse, HTMLResponse, RedirectResponse,
+    PlainTextResponse, StreamingResponse
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,7 +17,8 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 import requests
-import os, json, uuid, datetime, logging, traceback, mimetypes, shutil
+import os, json, uuid, datetime, logging, traceback, mimetypes, shutil, time
+import hmac, hashlib, base64
 
 
 # ---------- Boot ----------
@@ -31,8 +35,10 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 app = FastAPI(title="Harmonix")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], allow_credentials=True,
-    allow_methods=["*"], allow_headers=["*"],
+    allow_origins=["*"],  # tighten later if you want
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # ---------- Paths ----------
@@ -45,6 +51,16 @@ TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 STATIC_DIR    = os.path.join(BASE_DIR, "static")
 ALBUM_JSON    = os.path.join(ALBUM_DIR, "album.json")
 JOBS_JSON     = os.path.join(ALBUM_DIR, "jobs.json")
+
+# Control whether to expose /album publicly (default: yes for UI)
+PUBLIC_ALBUM = os.getenv("PUBLIC_ALBUM", "1") == "1"
+
+# Streaming secret for signed links
+STREAM_SECRET = os.getenv("PUBLIC_STREAM_SECRET", "")
+if not STREAM_SECRET:
+    logging.getLogger("harmonix").warning(
+        "PUBLIC_STREAM_SECRET is not set — signed streaming will not work until you set it."
+    )
 
 # -------- Public API keys (env OR secret file) ----------
 def _load_api_keys() -> set[str]:
@@ -74,7 +90,6 @@ def require_api_key(
 ):
     token = (x_api_key or api_key or "").strip()
     if not API_KEYS:
-        # safer to block if keys were not configured
         raise HTTPException(status_code=503, detail="API not configured (no PUBLIC_API_KEYS).")
     if token not in API_KEYS:
         raise HTTPException(status_code=401, detail="Invalid or missing API key.")
@@ -90,9 +105,13 @@ for f, init in [(ALBUM_JSON, []), (JOBS_JSON, {})]:
         with open(f, "w", encoding="utf-8") as fh:
             json.dump(init, fh, indent=2)
 
-# Static mounts (/album serves saved audio files)
+# Static mounts
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-app.mount("/album", StaticFiles(directory=ALBUM_DIR), name="album")
+if PUBLIC_ALBUM:
+    app.mount("/album", StaticFiles(directory=ALBUM_DIR), name="album")
+else:
+    logging.getLogger("harmonix").info("PUBLIC_ALBUM=0 → Not mounting /album publicly.")
+
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
 # ---------- Logging ----------
@@ -517,14 +536,43 @@ async def api_album_delete(track_id: str):
         logger.error("Delete error: %s\n%s", e, traceback.format_exc())
         return JSONResponse(status_code=500, content={"error": "delete_failed", "detail": str(e)})
 
-# ---------------- Public API v1 (API-key protected) ----------------
-api = APIRouter(prefix="/api/v1", dependencies=[Depends(require_api_key)], tags=["Public API"])
+# ---------- Signing helpers (for secure streaming) ----------
+def _b64url(b: bytes) -> str:
+    return base64.urlsafe_b64encode(b).decode().rstrip("=")
 
-@api.get("/health")
+def _unpad_b64(s: str) -> bytes:
+    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+
+def sign_stream(filename: str, exp_epoch: int) -> str:
+    """HMAC-SHA256 over '<filename>:<exp>' using STREAM_SECRET."""
+    msg = f"{filename}:{exp_epoch}".encode()
+    key = STREAM_SECRET.encode()
+    sig = hmac.new(key, msg, hashlib.sha256).digest()
+    return _b64url(sig)
+
+def verify_stream_sig(filename: str, exp_epoch: int, sig: str) -> bool:
+    if not STREAM_SECRET:
+        return False
+    try:
+        msg = f"{filename}:{exp_epoch}".encode()
+        key = STREAM_SECRET.encode()
+        expected = hmac.new(key, msg, hashlib.sha256).digest()
+        provided = _unpad_b64(sig)
+        if time.time() > exp_epoch:
+            return False
+        return hmac.compare_digest(expected, provided)
+    except Exception:
+        return False
+
+# ---------------- Public API v1 ----------------
+# (We attach the API key requirement PER route so /stream can allow signed URLs without a key.)
+api = APIRouter(prefix="/api/v1", tags=["Public API"])
+
+@api.get("/health", dependencies=[Depends(require_api_key)])
 def api_health():
     return {"ok": True, "time": datetime.datetime.utcnow().isoformat() + "Z"}
 
-@api.post("/generate")
+@api.post("/generate", dependencies=[Depends(require_api_key)])
 def api_generate(
     prompt: str = Form(...),
     title: Optional[str] = Form(None),
@@ -533,7 +581,7 @@ def api_generate(
     job = start_generation_job(prompt, title, duration)
     return {"job": job, "poll_url": f"/api/v1/jobs/{job['id']}"}
 
-@api.get("/jobs/{job_id}")
+@api.get("/jobs/{job_id}", dependencies=[Depends(require_api_key)])
 def api_job(job_id: str):
     jobs = jobs_read()
     job = jobs.get(job_id)
@@ -590,11 +638,32 @@ def api_job(job_id: str):
     else:
         return {"job": job}
 
-@api.get("/tracks")
-def api_tracks():
-    return list(reversed(album_read()))
+@api.get("/tracks", dependencies=[Depends(require_api_key)])
+def api_tracks(request: Request, ttl: int = Query(3600, ge=60, le=86400), signed: bool = Query(False)):
+    """List tracks (newest first). If signed=1, include short-lived secure_url for each."""
+    data = list(reversed(album_read()))
+    if not signed:
+        return data
 
-@api.get("/tracks/{track_id}")
+    base = str(request.base_url).rstrip("/")
+    now = int(time.time())
+    out = []
+    for t in data:
+        rel = t.get("url") or ""
+        if not rel:
+            continue
+        filename = rel.rsplit("/", 1)[-1]
+        item = dict(t)
+        if STREAM_SECRET:
+            exp = now + ttl
+            sig = sign_stream(filename, exp)
+            item["secure_url"] = f"{base}/api/v1/stream/{filename}?exp={exp}&sig={sig}"
+        else:
+            item["secure_url"] = f"{base}/api/v1/stream/{filename}?api_key=YOUR_KEY_HERE"
+        out.append(item)
+    return out
+
+@api.get("/tracks/{track_id}", dependencies=[Depends(require_api_key)])
 def api_track(track_id: str):
     data = album_read()
     track = next((t for t in data if t.get("id") == track_id), None)
@@ -602,7 +671,7 @@ def api_track(track_id: str):
         raise HTTPException(status_code=404, detail="not_found")
     return track
 
-@api.get("/tracks/{track_id}/download")
+@api.get("/tracks/{track_id}/download", dependencies=[Depends(require_api_key)])
 def api_track_download(track_id: str):
     data = album_read()
     track = next((t for t in data if t.get("id") == track_id), None)
@@ -610,24 +679,150 @@ def api_track_download(track_id: str):
         raise HTTPException(status_code=404, detail="not_found")
     return RedirectResponse(url=track["url"])
 
-@api.post("/upload")
-def api_upload_public(
+@api.post("/upload", dependencies=[Depends(require_api_key)])
+async def api_upload_public(
     title: Optional[str] = Form(None),
     artist: Optional[str] = Form(None),
     file: UploadFile = File(...)
 ):
-    return api_album_upload(title=title, artist=artist, file=file)
+    return await api_album_upload(title=title, artist=artist, file=file)
 
-@api.post("/import")
+@api.post("/import", dependencies=[Depends(require_api_key)])
 async def api_import_public(request: Request):
     return await api_album_import_url(request)
 
-@api.delete("/tracks/{track_id}")
-def api_delete_public(track_id: str):
-    return api_album_delete(track_id)
+@api.delete("/tracks/{track_id}", dependencies=[Depends(require_api_key)])
+async def api_delete_public(track_id: str):
+    return await api_album_delete(track_id)
+
+# ---- Secure streaming (accepts either signed URL OR API key) ----
+@api.get("/stream/{filename}")
+def api_stream_file(
+    filename: str,
+    request: Request,
+    sig: Optional[str] = Query(None),
+    exp: Optional[int] = Query(None),
+    x_api_key: Optional[str] = Header(None),
+    api_key: Optional[str] = Query(None),
+):
+    """
+    Secure streaming of an audio file.
+    - EITHER present a valid signed URL (?sig=...&exp=...)  (recommended for vendors / playlists)
+    - OR present a valid API key (X-API-Key or ?api_key=...), if you prefer key-only access.
+    Supports HTTP Range for streaming/seek.
+    """
+    authed = False
+    if sig and exp:
+        try:
+            exp_int = int(exp)
+        except Exception:
+            exp_int = 0
+        if verify_stream_sig(filename, exp_int, sig):
+            authed = True
+
+    if not authed:
+        token = (x_api_key or api_key or "").strip()
+        if API_KEYS and token in API_KEYS:
+            authed = True
+
+    if not authed:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    path = os.path.join(ALBUM_DIR, filename)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="file_not_found")
+
+    ctype, _ = mimetypes.guess_type(filename)
+    if not ctype:
+        ctype = "application/octet-stream"
+
+    file_size = os.path.getsize(path)
+    range_header = request.headers.get("Range")
+    if not range_header:
+        def iter_all():
+            with open(path, "rb") as f:
+                while True:
+                    chunk = f.read(1024 * 256)
+                    if not chunk:
+                        break
+                    yield chunk
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size),
+        }
+        return StreamingResponse(iter_all(), media_type=ctype, headers=headers)
+
+    # Parse Range: bytes=start-end
+    try:
+        units, rng = range_header.split("=")
+        if units.strip() != "bytes":
+            raise ValueError
+        start_s, end_s = rng.split("-")
+        start = int(start_s) if start_s else 0
+        end = int(end_s) if end_s else file_size - 1
+        if start < 0 or end >= file_size or start > end:
+            raise ValueError
+    except Exception:
+        hdrs = {"Content-Range": f"bytes */{file_size}"}
+        return Response(status_code=416, headers=hdrs)
+
+    length = end - start + 1
+    def iter_range(s=start, e=end):
+        with open(path, "rb") as f:
+            f.seek(s)
+            remaining = length
+            while remaining > 0:
+                chunk = f.read(min(1024 * 256, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    headers = {
+        "Content-Range": f"bytes {start}-{end}/{file_size}",
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(length),
+    }
+    return StreamingResponse(iter_range(), status_code=206, media_type=ctype, headers=headers)
+
+# ---- Playlist (returns signed URLs) ----
+@api.get("/playlist.m3u", response_class=PlainTextResponse, dependencies=[Depends(require_api_key)])
+def api_playlist_m3u(request: Request, ttl: int = Query(3600, ge=60, le=86400)):
+    """
+    Returns an M3U playlist of all album tracks (newest first) with
+    short-lived signed streaming URLs (default 1 hour).
+    Vendors can open this URL directly in players.
+    """
+    items = list(reversed(album_read()))  # newest first
+    base = str(request.base_url).rstrip("/")  # e.g., https://tingoaiapp.onrender.com
+    now = int(time.time())
+    lines = ["#EXTM3U"]
+
+    if not STREAM_SECRET:
+        logger.warning("PUBLIC_STREAM_SECRET not set — playlist will not be signed securely.")
+
+    for t in items:
+        rel = t.get("url") or ""
+        if not rel:
+            continue
+        filename = rel.rsplit("/", 1)[-1]
+        title = t.get("title") or "Track"
+
+        if STREAM_SECRET:
+            exp = now + ttl
+            sig = sign_stream(filename, exp)
+            url = f"{base}/api/v1/stream/{filename}?exp={exp}&sig={sig}"
+        else:
+            url = f"{base}/api/v1/stream/{filename}?api_key=YOUR_KEY_HERE"
+
+        lines.append(f"#EXTINF:-1,{title}")
+        lines.append(url)
+
+    return "\n".join(lines) + "\n"
 
 # Mount the router
 app.include_router(api)
+
 
 
 
