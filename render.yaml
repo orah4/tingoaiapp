@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: aitingoapp
+    env: python
+    region: oregon            # choose your closest region
+    plan: free                # upgrade later if needed
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: ALBUM_DIR
+        value: /data/album     # persistent storage path
+      - key: OPENAI_API_KEY
+        sync: false            # set securely in Render after creation
+      - key: REPLICATE_API_TOKEN
+        sync: false            # set securely in Render after creation
+    disks:
+      - name: album-disk
+        mountPath: /data
+        sizeGB: 5

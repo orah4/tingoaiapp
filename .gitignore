@@ -1,0 +1,9 @@
+# 0) Make sure these are ignored going forward
+@"
+.env
+__pycache__/
+*.pyc
+aipptingo/
+album/
+"@ | Set-Content -Encoding ASCII .gitignore
+
