@@ -1,131 +1,225 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Tingo Music Library</title>
+  <title>Tingo AI Music Library</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400;700&display=swap" rel="stylesheet" />
   <link rel="icon" href="data:,">
   <style>
-    body{font-family:'Open Sans',sans-serif;background:#1A1A1A;color:#fff}
-    .container{max-width:1000px;padding-top:4%}
-    .card{background:linear-gradient(145deg,#232323,#1A1A1A);border:none;border-radius:25px;box-shadow:0 0 20px #D63384}
-    .btn-primary{background:#D63384;border:none;border-radius:50px}
-    .btn-primary:hover{background:#C82373}
-    .form-control, .form-select{background:transparent;border-color:#eee;color:#fff}
-    .form-control::placeholder{color:#ADB5BD}
-    .audio-player{display:none;margin-top:20px}
-    .list-group-item{background:#111;border-color:#333;color:#eee}
-    #loader{display:none}
+    :root{
+      --brand:#D63384;
+      --bg:#121214;
+      --card:#191a1d;
+      --muted:#a9acb2;
+    }
+    html,body{height:100%;max-width:100%;overflow-x:hidden}
+    body{
+      font-family:'Open Sans',sans-serif;
+      background:
+        radial-gradient(1200px 800px at 50% -200px, rgba(214,51,132,.2), transparent 70%),
+        linear-gradient(180deg, #151518 0%, #0f0f12 100%);
+      color:#fff;
+      scroll-behavior:smooth;
+    }
+
+    /* App shell */
+    .app-shell{min-height:100dvh; display:flex; flex-direction:column}
+    .app-main{flex:1 0 auto}
+    .app-footer{flex:0 0 auto; background:#0f0f12; border-top:1px solid #24252a}
+
+    /* Cards */
+    .card{background:linear-gradient(145deg,#1b1c20,#111216); border:none; border-radius:20px}
+    .card.glow{box-shadow:0 0 0 1px rgba(255,255,255,.04), 0 0 28px rgba(214,51,132,.22)}
+    .card .form-control,.card .form-select{
+      background:rgba(255,255,255,.03); border-color:#34363c; color:#fff
+    }
+    .form-control::placeholder{color:#7f8590}
+    .btn-primary{background:var(--brand); border:none; border-radius:999px}
+    .btn-primary:hover{background:#b8246f}
+    .btn-outline-info{border-radius:999px}
+    .btn-outline-danger{border-radius:999px}
     a.btn{white-space:nowrap}
+
+    /* Lists */
+    .list-group-item{background:#101114; border-color:#24252a; color:#e8e8ea}
+    .list-title{font-weight:700; word-break:break-word}
+    .list-meta{color:var(--muted)}
+    .btn-wrap{display:flex; gap:.5rem; flex-wrap:wrap; justify-content:flex-end}
+
+    /* Now playing */
+    #waveform{width:100%}
+    .audio-player.d-none{display:none !important}
+
+    /* Layout containment */
+    .frame{max-width:980px; margin-inline:auto; padding:clamp(12px,2.5vw,20px)}
+    @supports (padding:max(0px)){
+      .frame{padding-left:max(16px,env(safe-area-inset-left)); padding-right:max(16px,env(safe-area-inset-right))}
+    }
   </style>
 </head>
 <body>
-<div class="container">
-  <h1 class="text-center mb-1"><b>Welcome to Tingo AI Music Library</b></h1>
-  <p class="text-center mb-4">Generate songs from text, upload your own music, or import from a direct URL—then enjoy your album.</p>
+<div class="app-shell">
 
-  <!-- Create (AI) -->
-  <div class="card mb-4">
-    <div class="card-body">
-      <h4 class="mb-3">Create AI Track</h4>
-      <div class="row g-3">
-        <div class="col-12">
-          <textarea id="description" class="form-control" rows="3"
-            placeholder="e.g., Triumphant cinematic Afrobeats with uplifting hook…"></textarea>
-        </div>
-        <div class="col-sm-8">
-          <label class="form-label">Optional Title</label>
-          <input id="title" class="form-control" placeholder="My New Track">
-        </div>
-        <div class="col-sm-4">
-          <label class="form-label">Duration (0–20s)</label>
-          <input type="range" class="form-range" id="durationSlider" min="0" max="20" value="10">
-        </div>
+  <!-- Top Navbar -->
+  <nav class="navbar navbar-dark sticky-top" style="background:#0f0f12;border-bottom:1px solid #24252a">
+    <div class="container-fluid">
+      <button class="btn btn-outline-light d-lg-none" data-bs-toggle="offcanvas" data-bs-target="#appSidebar" aria-controls="appSidebar">
+        ☰
+      </button>
+      <a class="navbar-brand ms-2 fw-bold" href="#">Tingo AI</a>
+      <div class="d-none d-sm-flex gap-2">
+        <a class="btn btn-sm btn-outline-light" href="#section-create">Create</a>
+        <a class="btn btn-sm btn-outline-light" href="#section-add">Add Music</a>
+        <a class="btn btn-sm btn-outline-light" href="#section-album">Album</a>
+        <a class="btn btn-sm btn-outline-info" href="/storage">Storage</a>
       </div>
-      <div class="d-grid mt-3">
-        <button id="generateButton" class="btn btn-primary"><b>Generate</b> 🚀</button>
-      </div>
-      <div id="loader" class="text-center mt-4">
-        <div class="spinner-grow text-warning" style="width:6rem;height:6rem" role="status"></div>
-        <div class="mt-3" id="loaderText">Creating job…</div>
-      </div>
+    </div>
+  </nav>
+
+  <!-- Offcanvas Sidebar -->
+  <div class="offcanvas offcanvas-start text-bg-dark" tabindex="-1" id="appSidebar" aria-labelledby="appSidebarLabel">
+    <div class="offcanvas-header">
+      <h5 class="offcanvas-title" id="appSidebarLabel">Menu</h5>
+      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+    </div>
+    <div class="offcanvas-body d-flex flex-column gap-2">
+      <a class="btn btn-outline-light" data-bs-dismiss="offcanvas" href="#section-create">Create AI Track</a>
+      <a class="btn btn-outline-light" data-bs-dismiss="offcanvas" href="#section-add">Add Your Music</a>
+      <a class="btn btn-outline-light" data-bs-dismiss="offcanvas" href="#section-now">Now Playing</a>
+      <a class="btn btn-outline-light" data-bs-dismiss="offcanvas" href="#section-album">Album</a>
+      <hr class="border-secondary">
+      <a class="btn btn-outline-info" href="/storage">Storage</a>
+      <a class="btn btn-outline-info" href="/api/v1/health">API Health</a>
     </div>
   </div>
 
-  <!-- Add Real Music -->
-  <div class="card mb-4">
-    <div class="card-body">
-      <h4 class="mb-3">Add Your Music</h4>
-      <div class="row g-3">
-        <!-- Upload local file -->
-        <div class="col-md-6">
-          <div class="border rounded p-3">
-            <h6>Upload Audio File</h6>
-            <input type="file" id="uploadFile" class="form-control" accept="audio/*">
-            <input type="text" id="uploadTitle" class="form-control mt-2" placeholder="Title (optional)">
-            <input type="text" id="uploadArtist" class="form-control mt-2" placeholder="Artist (optional)">
-            <div class="d-grid mt-2">
-              <button id="btnUpload" class="btn btn-primary">Upload</button>
+  <!-- Main -->
+  <main class="app-main">
+    <div class="frame">
+
+      <header class="text-center mb-4">
+        <h1 class="fw-bold mb-1">Tingo AI Music Library</h1>
+        <p class="text-muted mb-0">Generate songs, upload your tracks, import by URL — everything in one album.</p>
+      </header>
+
+      <!-- Create (AI) -->
+      <section id="section-create" class="card glow mb-4">
+        <div class="card-body">
+          <h4 class="mb-3">Create AI Track</h4>
+          <div class="row g-3">
+            <div class="col-12">
+              <textarea id="description" class="form-control" rows="3"
+                placeholder="e.g., Triumphant cinematic Afrobeats with uplifting hook…"></textarea>
             </div>
-            <small class="text-muted">Allowed: mp3, wav, ogg, webm, m4a (use files you have rights to).</small>
+            <div class="col-sm-8">
+              <label class="form-label">Optional Title</label>
+              <input id="title" class="form-control" placeholder="My New Track">
+            </div>
+            <div class="col-sm-4">
+              <label class="form-label">Duration (0–20s)</label>
+              <input type="range" class="form-range" id="durationSlider" min="0" max="20" value="10">
+            </div>
+          </div>
+          <div class="d-grid mt-3">
+            <button id="generateButton" class="btn btn-primary"><b>Generate</b> 🚀</button>
+          </div>
+          <div id="loader" class="text-center mt-4 d-none">
+            <div class="spinner-grow text-warning" style="width:5rem;height:5rem" role="status"></div>
+            <div class="mt-3" id="loaderText">Creating job…</div>
           </div>
         </div>
-        <!-- Import by URL -->
-        <div class="col-md-6">
-          <div class="border rounded p-3">
-            <h6>Import from Direct Audio URL</h6>
-            <input type="text" id="importUrl" class="form-control" placeholder="https://example.com/song.mp3">
-            <input type="text" id="importTitle" class="form-control mt-2" placeholder="Title (optional)">
-            <input type="text" id="importArtist" class="form-control mt-2" placeholder="Artist (optional)">
-            <div class="d-grid mt-2">
-              <button id="btnImport" class="btn btn-primary">Import</button>
+      </section>
+
+      <!-- Add Real Music -->
+      <section id="section-add" class="card glow mb-4">
+        <div class="card-body">
+          <h4 class="mb-3">Add Your Music</h4>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <div class="border rounded p-3">
+                <h6>Upload Audio File</h6>
+                <input type="file" id="uploadFile" class="form-control" accept="audio/*">
+                <input type="text" id="uploadTitle" class="form-control mt-2" placeholder="Title (optional)">
+                <input type="text" id="uploadArtist" class="form-control mt-2" placeholder="Artist (optional)">
+                <div class="d-grid mt-2">
+                  <button id="btnUpload" class="btn btn-primary">Upload</button>
+                </div>
+                <small class="text-muted">Allowed: mp3, wav, ogg, webm, m4a (use files you have rights to).</small>
+              </div>
             </div>
-            <small class="text-muted">Must be a direct audio link (mp3/wav/etc.). Do not use restricted sources.</small>
+            <div class="col-md-6">
+              <div class="border rounded p-3">
+                <h6>Import from Direct Audio URL</h6>
+                <input type="text" id="importUrl" class="form-control" placeholder="https://example.com/song.mp3">
+                <input type="text" id="importTitle" class="form-control mt-2" placeholder="Title (optional)">
+                <input type="text" id="importArtist" class="form-control mt-2" placeholder="Artist (optional)">
+                <div class="d-grid mt-2">
+                  <button id="btnImport" class="btn btn-primary">Import</button>
+                </div>
+                <small class="text-muted">Must be a direct audio link (mp3/wav/etc.). Do not use restricted sources.</small>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
-    </div>
-  </div>
+      </section>
 
-  <!-- Now Playing -->
-  <div class="card mb-4 audio-player" id="nowPlayingCard">
-    <div class="card-body">
-      <h4 class="mb-0">Now Playing: <span id="npTitle">—</span></h4>
-      <div class="mt-1"><span class="badge bg-secondary" id="npTime"></span></div>
-      <div class="text-muted" id="npArtist"></div>
-      <p class="mt-3 mb-2" id="npLyrics" style="white-space:pre-wrap;"></p>
-      <div id="waveform" class="mt-3"></div>
-      <div class="mt-3 d-flex gap-2">
-        <button id="btnPlayPause" class="btn btn-sm btn-primary">Play/Pause</button>
-        <button id="btnStop" class="btn btn-sm btn-secondary">Stop</button>
-        <button id="btnPrev" class="btn btn-sm btn-outline-light">« Prev</button>
-        <button id="btnNext" class="btn btn-sm btn-outline-light">Next »</button>
-        <a id="downloadLink" class="btn btn-sm btn-outline-info" download>Download</a>
-      </div>
-    </div>
-  </div>
-
-  <!-- Album -->
-  <div class="card">
-    <div class="card-body">
-      <div class="d-flex justify-content-between align-items-center">
-        <h4 class="mb-0">Your Album</h4>
-        <div class="d-flex gap-2">
-          <input type="time" id="scheduleTime" class="form-control form-control-sm" style="width:140px" />
-          <button id="btnSchedule" class="btn btn-sm btn-outline-info">Schedule Play All</button>
-          <button id="btnPlayAll" class="btn btn-sm btn-outline-light">Play All</button>
-          <button id="btnRefresh" class="btn btn-sm btn-outline-secondary">Refresh</button>
+      <!-- Now Playing -->
+      <section id="section-now" class="card glow mb-4 audio-player d-none">
+        <div class="card-body">
+          <h4 class="mb-0">Now Playing: <span id="npTitle">—</span></h4>
+          <div class="mt-1"><span class="badge bg-secondary" id="npTime"></span></div>
+          <div class="text-muted" id="npArtist"></div>
+          <p class="mt-3 mb-2" id="npLyrics" style="white-space:pre-wrap;"></p>
+          <div id="waveform" class="mt-3"></div>
+          <div class="mt-3 d-flex flex-wrap gap-2">
+            <button id="btnPlayPause" class="btn btn-sm btn-primary">Play/Pause</button>
+            <button id="btnStop" class="btn btn-sm btn-outline-light">Stop</button>
+            <button id="btnPrev" class="btn btn-sm btn-outline-light">« Prev</button>
+            <button id="btnNext" class="btn btn-sm btn-outline-light">Next »</button>
+            <a id="downloadLink" class="btn btn-sm btn-outline-info" download>Download</a>
+          </div>
         </div>
-      </div>
-      <ul id="albumList" class="list-group list-group flush mt-3"></ul>
+      </section>
+
+      <!-- Album -->
+      <section id="section-album" class="card glow">
+        <div class="card-body">
+          <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center">
+            <h4 class="mb-0">Your Album</h4>
+            <div class="d-flex flex-wrap gap-2">
+              <input type="time" id="scheduleTime" class="form-control form-control-sm" style="width:140px" />
+              <button id="btnSchedule" class="btn btn-sm btn-outline-info">Schedule Play All</button>
+              <button id="btnPlayAll" class="btn btn-sm btn-outline-light">Play All</button>
+              <button id="btnRefresh" class="btn btn-sm btn-outline-secondary">Refresh</button>
+            </div>
+          </div>
+          <ul id="albumList" class="list-group list-group-flush mt-3"></ul>
+        </div>
+      </section>
+
     </div>
-  </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="app-footer py-3">
+    <div class="frame d-flex flex-wrap justify-content-between align-items-center">
+      <small class="text-muted">© <span id="yyyy"></span> Tingo AI</small>
+      <div class="d-flex gap-2">
+        <a class="text-decoration-none" href="/storage">Storage</a>
+        <a class="text-decoration-none" href="/api/v1/health">API</a>
+      </div>
+    </div>
+  </footer>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://unpkg.com/wavesurfer.js"></script>
 <script>
+  document.getElementById('yyyy').textContent = new Date().getFullYear();
+
+  // ---- WaveSurfer ----
   let wavesurfer = WaveSurfer.create({
     container: '#waveform',
     waveColor: '#b96ad9',
@@ -134,6 +228,7 @@
     height: 90
   });
 
+  // ---- App state ----
   let album = [];
   let queue = [];
   let currentIndex = -1;
@@ -142,16 +237,13 @@
   const $ = id => document.getElementById(id);
 
   function showNowPlaying(track){
-    $('nowPlayingCard').style.display = 'block';
+    document.getElementById('section-now').classList.remove('d-none');
     $('npTitle').textContent = track.title || '(untitled)';
     $('npArtist').textContent = track.artist ? `Artist: ${track.artist}` : '';
     $('npLyrics').textContent = track.lyrics || '';
     $('downloadLink').href = track.url || '#';
     $('npTime').textContent = new Date(track.created_at || Date.now()).toLocaleString();
-
-    if (track.url){
-      wavesurfer.load(track.url);
-    }
+    if (track.url){ wavesurfer.load(track.url); }
   }
 
   async function loadAlbum(){
@@ -164,22 +256,26 @@
     const list = $('albumList');
     list.innerHTML = '';
     if (!album.length){
-      list.innerHTML = '<li class="list-group-item">No tracks yet. Generate one above, upload, or import by URL.</li>';
+      list.innerHTML = '<li class="list-group-item">No tracks yet. Generate, upload, or import to get started.</li>';
       return;
     }
     album.forEach((t, idx) => {
       const li = document.createElement('li');
-      li.className = 'list-group-item d-flex justify-content-between align-items-center';
+      li.className = 'list-group-item';
       li.innerHTML = `
-        <div>
-          <strong>${t.title || '(untitled)'}</strong>
-          ${t.artist ? `<div class="small">${t.artist}</div>` : ''}
-          <div class="text-muted small">${t.created_at ? new Date(t.created_at).toLocaleString() : ''} • ${t.source || ''}</div>
-        </div>
-        <div class="d-flex align-items-center gap-2">
-          <button class="btn btn-sm btn-primary" data-idx="${idx}" ${t.url ? '' : 'disabled'}>Play</button>
-          ${t.url ? `<a class="btn btn-sm btn-outline-info" href="${t.url}" download>Download</a>` : ''}
-          <button class="btn btn-sm btn-outline-danger" data-del="${t.id}">Delete</button>
+        <div class="row align-items-center g-2">
+          <div class="col-12 col-md-7">
+            <div class="list-title">${t.title || '(untitled)'}</div>
+            ${t.artist ? `<div class="small">${t.artist}</div>` : ''}
+            <div class="list-meta small">${t.created_at ? new Date(t.created_at).toLocaleString() : ''} • ${t.source || ''}</div>
+          </div>
+          <div class="col-12 col-md-5">
+            <div class="btn-wrap">
+              <button class="btn btn-sm btn-primary" data-idx="${idx}" ${t.url ? '' : 'disabled'}>Play</button>
+              ${t.url ? `<a class="btn btn-sm btn-outline-info" href="${t.url}" download>Download</a>` : ''}
+              <button class="btn btn-sm btn-outline-danger" data-del="${t.id}">Delete</button>
+            </div>
+          </div>
         </div>`;
       li.querySelector('button[data-idx]')?.addEventListener('click', () => playSingle(idx));
       li.querySelector('button[data-del]')?.addEventListener('click', () => deleteTrack(t.id));
@@ -191,12 +287,14 @@
     queue = [albumIndex];
     currentIndex = 0;
     playFromQueue();
+    document.getElementById('section-now').scrollIntoView({behavior:'smooth'});
   }
 
   function playAll(){
     queue = album.map((_, i) => i);
     currentIndex = 0;
     playFromQueue();
+    document.getElementById('section-now').scrollIntoView({behavior:'smooth'});
   }
 
   function playFromQueue(){
@@ -205,7 +303,7 @@
     showNowPlaying(track);
   }
 
-  // wavesurfer controls
+  // WaveSurfer controls
   wavesurfer.on('ready', () => wavesurfer.play());
   wavesurfer.on('finish', () => {
     if (currentIndex >= 0 && currentIndex < queue.length - 1){
@@ -216,18 +314,14 @@
 
   $('btnPlayPause').onclick = () => wavesurfer.playPause();
   $('btnStop').onclick = () => wavesurfer.stop();
-  $('btnNext').onclick = () => {
-    if (currentIndex >= 0 && currentIndex < queue.length - 1){ currentIndex++; playFromQueue(); }
-  };
-  $('btnPrev').onclick = () => {
-    if (currentIndex > 0){ currentIndex--; playFromQueue(); }
-  };
+  $('btnNext').onclick = () => { if (currentIndex >= 0 && currentIndex < queue.length - 1){ currentIndex++; playFromQueue(); } };
+  $('btnPrev').onclick = () => { if (currentIndex > 0){ currentIndex--; playFromQueue(); } };
   $('btnPlayAll').onclick = playAll;
   $('btnRefresh').onclick = loadAlbum;
 
-  // Schedule (client-side)
+  // Simple schedule (client-side)
   $('btnSchedule').onclick = () => {
-    const t = $('scheduleTime').value; // "HH:MM"
+    const t = $('scheduleTime').value;
     if (!t){ alert('Pick a time'); return; }
     const [hh, mm] = t.split(':').map(Number);
     const now = new Date();
@@ -242,6 +336,7 @@
   // ---- Job flow (AI) ----
   async function pollJob(jobId){
     if (pollTimer) clearInterval(pollTimer);
+    document.getElementById('loader').classList.remove('d-none');
     $('loaderText').textContent = 'Generating audio…';
     pollTimer = setInterval(async () => {
       try{
@@ -251,24 +346,24 @@
           const status = data?.job?.status;
           if (status === 'succeeded' && data.track){
             clearInterval(pollTimer);
-            $('loader').style.display = 'none';
+            document.getElementById('loader').classList.add('d-none');
             showNowPlaying(data.track);
             await loadAlbum();
           } else if (status === 'failed' || status === 'canceled'){
             clearInterval(pollTimer);
-            $('loader').style.display = 'none';
+            document.getElementById('loader').classList.add('d-none');
             alert('Generation failed: ' + (data.job?.error || status));
           } else {
             $('loaderText').textContent = `Generating audio… (${status})`;
           }
         } else {
           clearInterval(pollTimer);
-          $('loader').style.display = 'none';
+          document.getElementById('loader').classList.add('d-none');
           alert('Polling error. Please try again.');
         }
-      } catch (e){
+      } catch {
         clearInterval(pollTimer);
-        $('loader').style.display = 'none';
+        document.getElementById('loader').classList.add('d-none');
         alert('Network error while polling.');
       }
     }, 3000);
@@ -280,7 +375,7 @@
     const duration = $('durationSlider').value;
     if (!prompt){ alert('Please enter a description'); return; }
 
-    $('loader').style.display = 'block';
+    document.getElementById('loader').classList.remove('d-none');
     $('loaderText').textContent = 'Creating job…';
 
     const fd = new FormData();
@@ -297,10 +392,10 @@
       if (result.job && result.job.id){
         $('npLyrics').textContent = result.job.lyrics || '';
         $('npTitle').textContent = result.job.title || '';
-        $('nowPlayingCard').style.display = 'block';
+        document.getElementById('section-now').classList.remove('d-none');
         pollJob(result.job.id);
       } else if (result.track) {
-        $('loader').style.display = 'none';
+        document.getElementById('loader').classList.add('d-none');
         showNowPlaying(result.track);
         await loadAlbum();
       } else {
@@ -308,7 +403,7 @@
       }
     } catch (e){
       console.error(e);
-      $('loader').style.display = 'none';
+      document.getElementById('loader').classList.add('d-none');
       alert('Failed to start generation: ' + e.message);
     }
   });
@@ -361,10 +456,9 @@
     const res = await fetch(`/api/album/${id}`, { method:'DELETE' });
     if (res.ok){
       await loadAlbum();
-      // Stop playback if we deleted the current one
       if (currentIndex >= 0){
         wavesurfer.stop();
-        $('nowPlayingCard').style.display = 'none';
+        document.getElementById('section-now').classList.add('d-none');
       }
     } else {
       const data = await res.json().catch(()=>({}));
