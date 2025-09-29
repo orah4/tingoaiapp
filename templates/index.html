@@ -23,36 +23,23 @@
       color:#fff;
       scroll-behavior:smooth;
     }
-
-    /* App shell */
     .app-shell{min-height:100dvh; display:flex; flex-direction:column}
     .app-main{flex:1 0 auto}
     .app-footer{flex:0 0 auto; background:#0f0f12; border-top:1px solid #24252a}
-
-    /* Cards */
     .card{background:linear-gradient(145deg,#1b1c20,#111216); border:none; border-radius:20px}
     .card.glow{box-shadow:0 0 0 1px rgba(255,255,255,.04), 0 0 28px rgba(214,51,132,.22)}
-    .card .form-control,.card .form-select{
-      background:rgba(255,255,255,.03); border-color:#34363c; color:#fff
-    }
+    .card .form-control,.card .form-select{background:rgba(255,255,255,.03); border-color:#34363c; color:#fff}
     .form-control::placeholder{color:#7f8590}
     .btn-primary{background:var(--brand); border:none; border-radius:999px}
     .btn-primary:hover{background:#b8246f}
-    .btn-outline-info{border-radius:999px}
-    .btn-outline-danger{border-radius:999px}
+    .btn-outline-info,.btn-outline-danger{border-radius:999px}
     a.btn{white-space:nowrap}
-
-    /* Lists */
     .list-group-item{background:#101114; border-color:#24252a; color:#e8e8ea}
     .list-title{font-weight:700; word-break:break-word}
     .list-meta{color:var(--muted)}
     .btn-wrap{display:flex; gap:.5rem; flex-wrap:wrap; justify-content:flex-end}
-
-    /* Now playing */
     #waveform{width:100%}
     .audio-player.d-none{display:none !important}
-
-    /* Layout containment */
     .frame{max-width:980px; margin-inline:auto; padding:clamp(12px,2.5vw,20px)}
     @supports (padding:max(0px)){
       .frame{padding-left:max(16px,env(safe-area-inset-left)); padding-right:max(16px,env(safe-area-inset-right))}
@@ -62,15 +49,14 @@
 <body>
 <div class="app-shell">
 
-  <!-- Top Navbar -->
+  <!-- Navbar -->
   <nav class="navbar navbar-dark sticky-top" style="background:#0f0f12;border-bottom:1px solid #24252a">
     <div class="container-fluid">
-      <button class="btn btn-outline-light d-lg-none" data-bs-toggle="offcanvas" data-bs-target="#appSidebar" aria-controls="appSidebar">
-        ☰
-      </button>
+      <button class="btn btn-outline-light d-lg-none" data-bs-toggle="offcanvas" data-bs-target="#appSidebar">☰</button>
       <a class="navbar-brand ms-2 fw-bold" href="#">Tingo AI</a>
       <div class="d-none d-sm-flex gap-2">
         <a class="btn btn-sm btn-outline-light" href="#section-create">Create</a>
+        <a class="btn btn-sm btn-outline-light" href="#section-compose">Compose</a>
         <a class="btn btn-sm btn-outline-light" href="#section-add">Add Music</a>
         <a class="btn btn-sm btn-outline-light" href="#section-album">Album</a>
         <a class="btn btn-sm btn-outline-info" href="/storage">Storage</a>
@@ -78,17 +64,18 @@
     </div>
   </nav>
 
-  <!-- Offcanvas Sidebar -->
-  <div class="offcanvas offcanvas-start text-bg-dark" tabindex="-1" id="appSidebar" aria-labelledby="appSidebarLabel">
+  <!-- Sidebar -->
+  <div class="offcanvas offcanvas-start text-bg-dark" id="appSidebar">
     <div class="offcanvas-header">
-      <h5 class="offcanvas-title" id="appSidebarLabel">Menu</h5>
-      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+      <h5 class="offcanvas-title">Menu</h5>
+      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas"></button>
     </div>
     <div class="offcanvas-body d-flex flex-column gap-2">
-      <a class="btn btn-outline-light" data-bs-dismiss="offcanvas" href="#section-create">Create AI Track</a>
-      <a class="btn btn-outline-light" data-bs-dismiss="offcanvas" href="#section-add">Add Your Music</a>
-      <a class="btn btn-outline-light" data-bs-dismiss="offcanvas" href="#section-now">Now Playing</a>
-      <a class="btn btn-outline-light" data-bs-dismiss="offcanvas" href="#section-album">Album</a>
+      <a class="btn btn-outline-light" href="#section-create" data-bs-dismiss="offcanvas">Create AI Track</a>
+      <a class="btn btn-outline-light" href="#section-compose" data-bs-dismiss="offcanvas">Compose Long Track</a>
+      <a class="btn btn-outline-light" href="#section-add" data-bs-dismiss="offcanvas">Add Your Music</a>
+      <a class="btn btn-outline-light" href="#section-now" data-bs-dismiss="offcanvas">Now Playing</a>
+      <a class="btn btn-outline-light" href="#section-album" data-bs-dismiss="offcanvas">Album</a>
       <hr class="border-secondary">
       <a class="btn btn-outline-info" href="/storage">Storage</a>
       <a class="btn btn-outline-info" href="/api/v1/health">API Health</a>
@@ -101,71 +88,143 @@
 
       <header class="text-center mb-4">
         <h1 class="fw-bold mb-1">Tingo AI Music Library</h1>
-        <p class="text-muted mb-0">Generate songs, upload your tracks, import by URL — everything in one album.</p>
+        <p class="text-muted mb-0">Generate short songs, compose long suites, upload or import tracks.</p>
       </header>
 
-      <!-- Create (AI) -->
+      <!-- Create short track -->
       <section id="section-create" class="card glow mb-4">
         <div class="card-body">
-          <h4 class="mb-3">Create AI Track</h4>
-          <div class="row g-3">
-            <div class="col-12">
-              <textarea id="description" class="form-control" rows="3"
-                placeholder="e.g., Triumphant cinematic Afrobeats with uplifting hook…"></textarea>
-            </div>
-            <div class="col-sm-8">
-              <label class="form-label">Optional Title</label>
-              <input id="title" class="form-control" placeholder="My New Track">
-            </div>
-            <div class="col-sm-4">
-              <label class="form-label">Duration (0–20s)</label>
-              <input type="range" class="form-range" id="durationSlider" min="0" max="20" value="10">
-            </div>
-          </div>
+          <h4>Create AI Track</h4>
+          <textarea id="description" class="form-control mb-2" rows="3" placeholder="Short prompt..."></textarea>
+          <input id="title" class="form-control mb-2" placeholder="My New Track">
+          <label>Duration (0–20s)</label>
+          <input type="range" class="form-range" id="durationSlider" min="0" max="20" value="10">
           <div class="d-grid mt-3">
             <button id="generateButton" class="btn btn-primary"><b>Generate</b> 🚀</button>
           </div>
           <div id="loader" class="text-center mt-4 d-none">
-            <div class="spinner-grow text-warning" style="width:5rem;height:5rem" role="status"></div>
-            <div class="mt-3" id="loaderText">Creating job…</div>
+            <div class="spinner-grow text-warning" style="width:5rem;height:5rem"></div>
+            <div id="loaderText">Creating job…</div>
           </div>
         </div>
       </section>
 
-      <!-- Add Real Music -->
-      <section id="section-add" class="card glow mb-4">
+      <!-- Compose long form -->
+      <!-- <section id="section-compose" class="card glow mb-4">
         <div class="card-body">
-          <h4 class="mb-3">Add Your Music</h4>
-          <div class="row g-3">
-            <div class="col-md-6">
-              <div class="border rounded p-3">
-                <h6>Upload Audio File</h6>
-                <input type="file" id="uploadFile" class="form-control" accept="audio/*">
-                <input type="text" id="uploadTitle" class="form-control mt-2" placeholder="Title (optional)">
-                <input type="text" id="uploadArtist" class="form-control mt-2" placeholder="Artist (optional)">
-                <div class="d-grid mt-2">
-                  <button id="btnUpload" class="btn btn-primary">Upload</button>
-                </div>
-                <small class="text-muted">Allowed: mp3, wav, ogg, webm, m4a (use files you have rights to).</small>
-              </div>
-            </div>
-            <div class="col-md-6">
-              <div class="border rounded p-3">
-                <h6>Import from Direct Audio URL</h6>
-                <input type="text" id="importUrl" class="form-control" placeholder="https://example.com/song.mp3">
-                <input type="text" id="importTitle" class="form-control mt-2" placeholder="Title (optional)">
-                <input type="text" id="importArtist" class="form-control mt-2" placeholder="Artist (optional)">
-                <div class="d-grid mt-2">
-                  <button id="btnImport" class="btn btn-primary">Import</button>
-                </div>
-                <small class="text-muted">Must be a direct audio link (mp3/wav/etc.). Do not use restricted sources.</small>
-              </div>
-            </div>
+          <h4>Compose Long Track</h4>
+          <textarea id="composePrompt" class="form-control mb-2" rows="3" placeholder="Theme or story prompt..."></textarea>
+          <input id="composeTitle" class="form-control mb-2" value="Odyssey Suite" placeholder="Title">
+          <div class="row g-2">
+            <div class="col-sm-4"><input id="composeTotal" type="number" class="form-control" value="20" min="6" max="60" placeholder="Total Minutes"></div>
+            <div class="col-sm-4"><input id="composeSection" type="number" class="form-control" value="4" min="2" max="8" placeholder="Section Minutes"></div>
+            <div class="col-sm-2"><input id="composeKey" class="form-control" value="A minor" placeholder="Key"></div>
+            <div class="col-sm-2"><input id="composeBpm" type="number" class="form-control" value="92" min="50" max="180" placeholder="BPM"></div>
+          </div>
+          <div class="d-grid mt-3">
+            <button id="composeButton" class="btn btn-primary"><b>Compose</b> 🎼</button>
+          </div>
+          <div id="composeLoader" class="text-center mt-4 d-none">
+            <div class="spinner-grow text-info" style="width:5rem;height:5rem"></div>
+            <div id="composeLoaderText">Composing track…</div>
           </div>
         </div>
-      </section>
+      </section> -->
 
-      <!-- Now Playing -->
+
+      <!-- Compose Long Track -->
+<section id="section-compose" class="card glow mb-4">
+  <div class="card-body">
+    <h4 class="mb-3">Compose Long Track</h4>
+    <div class="row g-3">
+      <div class="col-12">
+        <textarea id="composePrompt" class="form-control" rows="3"
+          placeholder="Theme or story prompt..."></textarea>
+      </div>
+      <div class="col-sm-6">
+        <label class="form-label">Optional Title</label>
+        <input id="composeTitle" class="form-control" placeholder="Odyssey Suite">
+      </div>
+      <div class="col-sm-3">
+        <label class="form-label">Total Minutes</label>
+        <input id="composeTotal" type="number" class="form-control" value="20">
+      </div>
+      <div class="col-sm-3">
+        <label class="form-label">Section Minutes</label>
+        <input id="composeSection" type="number" class="form-control" value="4">
+      </div>
+      <div class="col-sm-6">
+        <label class="form-label">Global Key</label>
+        <input id="composeKey" class="form-control" placeholder="A minor">
+      </div>
+      <div class="col-sm-6">
+        <label class="form-label">Global BPM</label>
+        <input id="composeBpm" type="number" class="form-control" value="92">
+      </div>
+    </div>
+    <div class="d-grid mt-3">
+      <button id="composeButton" class="btn btn-primary"><b>Compose</b> 🎶</button>
+    </div>
+    <div id="composeLoader" class="text-center mt-4 d-none">
+      <div class="spinner-grow text-info" style="width:5rem;height:5rem" role="status"></div>
+      <div class="mt-3" id="composeLoaderText">Composing long-form track…</div>
+    </div>
+  </div>
+</section>
+
+
+      <!-- Add Music -->
+      <!-- (same as before, upload & import sections) -->
+
+
+<!-- Add Real Music -->
+<section id="section-add" class="card glow mb-4">
+  <div class="card-body">
+    <h4 class="mb-3">Add Your Music</h4>
+    <div class="row g-3">
+      
+      <!-- Upload File -->
+      <div class="col-md-6">
+        <div class="border rounded p-3">
+          <h6>Upload Audio File</h6>
+          <input type="file" id="uploadFile" class="form-control" accept="audio/*">
+          <input type="text" id="uploadTitle" class="form-control mt-2" placeholder="Title (optional)">
+          <input type="text" id="uploadArtist" class="form-control mt-2" placeholder="Artist (optional)">
+          <div class="d-grid mt-2">
+            <button id="btnUpload" class="btn btn-primary">Upload</button>
+          </div>
+          <small class="text-muted">Allowed: mp3, wav, ogg, webm, m4a (use files you have rights to).</small>
+        </div>
+      </div>
+
+      <!-- Import by URL -->
+      <div class="col-md-6">
+        <div class="border rounded p-3">
+          <h6>Import from Direct Audio URL</h6>
+          <input type="text" id="importUrl" class="form-control" placeholder="https://example.com/song.mp3">
+          <input type="text" id="importTitle" class="form-control mt-2" placeholder="Title (optional)">
+          <input type="text" id="importArtist" class="form-control mt-2" placeholder="Artist (optional)">
+          <div class="d-grid mt-2">
+            <button id="btnImport" class="btn btn-primary">Import</button>
+          </div>
+          <small class="text-muted">Must be a direct audio link (mp3/wav/etc.). Do not use restricted sources.</small>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+
+
+
+
+
+
+      <!-- Now Playing + Album -->
+      <!-- (same as before) -->
+
+     <!-- Now Playing -->
       <section id="section-now" class="card glow mb-4 audio-player d-none">
         <div class="card-body">
           <h4 class="mb-0">Now Playing: <span id="npTitle">—</span></h4>
@@ -199,12 +258,17 @@
         </div>
       </section>
 
+
+
+
+
+
     </div>
   </main>
 
   <!-- Footer -->
   <footer class="app-footer py-3">
-    <div class="frame d-flex flex-wrap justify-content-between align-items-center">
+    <div class="frame d-flex justify-content-between">
       <small class="text-muted">© <span id="yyyy"></span> Tingo AI</small>
       <div class="d-flex gap-2">
         <a class="text-decoration-none" href="/storage">Storage</a>
@@ -216,258 +280,228 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://unpkg.com/wavesurfer.js"></script>
+
 <script>
-  document.getElementById('yyyy').textContent = new Date().getFullYear();
+document.getElementById('yyyy').textContent = new Date().getFullYear();
 
-  // ---- WaveSurfer ----
-  let wavesurfer = WaveSurfer.create({
-    container: '#waveform',
-    waveColor: '#b96ad9',
-    progressColor: '#7a3fb0',
-    cursorColor: '#ccc',
-    height: 90
-  });
+// --- Global state ---
+let wavesurfer = WaveSurfer.create({
+  container:'#waveform',
+  waveColor:'#b96ad9',
+  progressColor:'#7a3fb0',
+  cursorColor:'#ccc',
+  height:90
+});
+let album=[],queue=[],currentIndex=-1,pollTimer=null;
+const $=id=>document.getElementById(id);
 
-  // ---- App state ----
-  let album = [];
-  let queue = [];
-  let currentIndex = -1;
-  let pollTimer = null;
+// --- Show Now Playing ---
+function showNowPlaying(track){
+  document.getElementById('section-now').classList.remove('d-none');
+  $('npTitle').textContent = track.title || '(untitled)';
+  $('npArtist').textContent = track.artist ? `Artist: ${track.artist}` : '';
+  $('npLyrics').textContent = track.lyrics || '';
+  $('downloadLink').href = track.url || '#';
+  $('npTime').textContent = new Date(track.created_at || Date.now()).toLocaleString();
+  if (track.url){ wavesurfer.load(track.url); }
+}
 
-  const $ = id => document.getElementById(id);
-
-  function showNowPlaying(track){
-    document.getElementById('section-now').classList.remove('d-none');
-    $('npTitle').textContent = track.title || '(untitled)';
-    $('npArtist').textContent = track.artist ? `Artist: ${track.artist}` : '';
-    $('npLyrics').textContent = track.lyrics || '';
-    $('downloadLink').href = track.url || '#';
-    $('npTime').textContent = new Date(track.created_at || Date.now()).toLocaleString();
-    if (track.url){ wavesurfer.load(track.url); }
+// --- Album management ---
+async function loadAlbum(){
+  const res = await fetch('/api/album');
+  album = await res.json();
+  renderAlbum();
+}
+function renderAlbum(){
+  const list = $('albumList');
+  list.innerHTML = '';
+  if (!album.length){
+    list.innerHTML = '<li class="list-group-item">No tracks yet. Generate, upload, or import to get started.</li>';
+    return;
   }
-
-  async function loadAlbum(){
-    const res = await fetch('/api/album');
-    album = await res.json();
-    renderAlbum();
-  }
-
-  function renderAlbum(){
-    const list = $('albumList');
-    list.innerHTML = '';
-    if (!album.length){
-      list.innerHTML = '<li class="list-group-item">No tracks yet. Generate, upload, or import to get started.</li>';
-      return;
-    }
-    album.forEach((t, idx) => {
-      const li = document.createElement('li');
-      li.className = 'list-group-item';
-      li.innerHTML = `
-        <div class="row align-items-center g-2">
-          <div class="col-12 col-md-7">
-            <div class="list-title">${t.title || '(untitled)'}</div>
-            ${t.artist ? `<div class="small">${t.artist}</div>` : ''}
-            <div class="list-meta small">${t.created_at ? new Date(t.created_at).toLocaleString() : ''} • ${t.source || ''}</div>
+  album.forEach((t, idx) => {
+    const li = document.createElement('li');
+    li.className = 'list-group-item';
+    li.innerHTML = `
+      <div class="row align-items-center g-2">
+        <div class="col-12 col-md-7">
+          <div class="list-title">${t.title || '(untitled)'}</div>
+          ${t.artist ? `<div class="small">${t.artist}</div>` : ''}
+          <div class="list-meta small">${t.created_at ? new Date(t.created_at).toLocaleString() : ''} • ${t.source || ''}</div>
+        </div>
+        <div class="col-12 col-md-5">
+          <div class="btn-wrap">
+            <button class="btn btn-sm btn-primary" data-idx="${idx}" ${t.url ? '' : 'disabled'}>Play</button>
+            ${t.url ? `<a class="btn btn-sm btn-outline-info" href="${t.url}" download>Download</a>` : ''}
+            <button class="btn btn-sm btn-outline-danger" data-del="${t.id}">Delete</button>
           </div>
-          <div class="col-12 col-md-5">
-            <div class="btn-wrap">
-              <button class="btn btn-sm btn-primary" data-idx="${idx}" ${t.url ? '' : 'disabled'}>Play</button>
-              ${t.url ? `<a class="btn btn-sm btn-outline-info" href="${t.url}" download>Download</a>` : ''}
-              <button class="btn btn-sm btn-outline-danger" data-del="${t.id}">Delete</button>
-            </div>
-          </div>
-        </div>`;
-      li.querySelector('button[data-idx]')?.addEventListener('click', () => playSingle(idx));
-      li.querySelector('button[data-del]')?.addEventListener('click', () => deleteTrack(t.id));
-      list.appendChild(li);
-    });
-  }
-
-  function playSingle(albumIndex){
-    queue = [albumIndex];
-    currentIndex = 0;
-    playFromQueue();
-    document.getElementById('section-now').scrollIntoView({behavior:'smooth'});
-  }
-
-  function playAll(){
-    queue = album.map((_, i) => i);
-    currentIndex = 0;
-    playFromQueue();
-    document.getElementById('section-now').scrollIntoView({behavior:'smooth'});
-  }
-
-  function playFromQueue(){
-    if (currentIndex < 0 || currentIndex >= queue.length) return;
-    const track = album[queue[currentIndex]];
-    showNowPlaying(track);
-  }
-
-  // WaveSurfer controls
-  wavesurfer.on('ready', () => wavesurfer.play());
-  wavesurfer.on('finish', () => {
-    if (currentIndex >= 0 && currentIndex < queue.length - 1){
-      currentIndex += 1;
-      playFromQueue();
-    }
+        </div>
+      </div>`;
+    li.querySelector('button[data-idx]')?.addEventListener('click', () => playSingle(idx));
+    li.querySelector('button[data-del]')?.addEventListener('click', () => deleteTrack(t.id));
+    list.appendChild(li);
   });
+}
+function playSingle(albumIndex){
+  queue = [albumIndex]; currentIndex = 0; playFromQueue();
+  document.getElementById('section-now').scrollIntoView({behavior:'smooth'});
+}
+function playAll(){
+  queue = album.map((_, i) => i); currentIndex = 0; playFromQueue();
+  document.getElementById('section-now').scrollIntoView({behavior:'smooth'});
+}
+function playFromQueue(){
+  if (currentIndex < 0 || currentIndex >= queue.length) return;
+  showNowPlaying(album[queue[currentIndex]]);
+}
 
-  $('btnPlayPause').onclick = () => wavesurfer.playPause();
-  $('btnStop').onclick = () => wavesurfer.stop();
-  $('btnNext').onclick = () => { if (currentIndex >= 0 && currentIndex < queue.length - 1){ currentIndex++; playFromQueue(); } };
-  $('btnPrev').onclick = () => { if (currentIndex > 0){ currentIndex--; playFromQueue(); } };
-  $('btnPlayAll').onclick = playAll;
-  $('btnRefresh').onclick = loadAlbum;
+// --- WaveSurfer controls ---
+wavesurfer.on('ready', () => wavesurfer.play());
+wavesurfer.on('finish', () => { if (currentIndex < queue.length-1){ currentIndex++; playFromQueue(); }});
+$('btnPlayPause').onclick = () => wavesurfer.playPause();
+$('btnStop').onclick = () => wavesurfer.stop();
+$('btnNext').onclick = () => { if (currentIndex < queue.length-1){ currentIndex++; playFromQueue(); } };
+$('btnPrev').onclick = () => { if (currentIndex > 0){ currentIndex--; playFromQueue(); } };
+$('btnPlayAll').onclick = playAll;
+$('btnRefresh').onclick = loadAlbum;
 
-  // Simple schedule (client-side)
-  $('btnSchedule').onclick = () => {
-    const t = $('scheduleTime').value;
-    if (!t){ alert('Pick a time'); return; }
-    const [hh, mm] = t.split(':').map(Number);
-    const now = new Date();
-    const when = new Date();
-    when.setHours(hh, mm, 0, 0);
-    if (when <= now) when.setDate(when.getDate() + 1);
-    const ms = when - now;
-    setTimeout(() => { playAll(); }, ms);
-    alert('Scheduled at ' + when.toLocaleString());
-  };
+// --- Scheduler ---
+$('btnSchedule').onclick = () => {
+  const t = $('scheduleTime').value;
+  if (!t){ alert('Pick a time'); return; }
+  const [hh, mm] = t.split(':').map(Number);
+  const now = new Date(); const when = new Date();
+  when.setHours(hh, mm, 0, 0);
+  if (when <= now) when.setDate(when.getDate() + 1);
+  setTimeout(() => playAll(), when - now);
+  alert('Scheduled at ' + when.toLocaleString());
+};
 
-  // ---- Job flow (AI) ----
-  async function pollJob(jobId){
-    if (pollTimer) clearInterval(pollTimer);
-    document.getElementById('loader').classList.remove('d-none');
-    $('loaderText').textContent = 'Generating audio…';
-    pollTimer = setInterval(async () => {
-      try{
-        const res = await fetch(`/job/${jobId}`);
-        const data = await res.json();
-        if (res.ok){
-          const status = data?.job?.status;
-          if (status === 'succeeded' && data.track){
-            clearInterval(pollTimer);
-            document.getElementById('loader').classList.add('d-none');
-            showNowPlaying(data.track);
-            await loadAlbum();
-          } else if (status === 'failed' || status === 'canceled'){
-            clearInterval(pollTimer);
-            document.getElementById('loader').classList.add('d-none');
-            alert('Generation failed: ' + (data.job?.error || status));
-          } else {
-            $('loaderText').textContent = `Generating audio… (${status})`;
-          }
-        } else {
+// --- Poll Job (shared) ---
+async function pollJob(jobId, loaderId, loaderTextId){
+  if(pollTimer) clearInterval(pollTimer);
+  $(loaderId).classList.remove('d-none');
+  $(loaderTextId).textContent='Generating audio…';
+  pollTimer=setInterval(async()=>{
+    try{
+      const res=await fetch(`/api/v1/jobs/${jobId}`);
+      const data=await res.json();
+      if(res.ok){
+        const status=data?.job?.status;
+        if(status==='succeeded' && data.track){
           clearInterval(pollTimer);
-          document.getElementById('loader').classList.add('d-none');
-          alert('Polling error. Please try again.');
+          $(loaderId).classList.add('d-none');
+          showNowPlaying(data.track);
+          await loadAlbum();
+        }else if(status==='failed'||status==='canceled'){
+          clearInterval(pollTimer);
+          $(loaderId).classList.add('d-none');
+          alert('Failed: '+(data.job?.error||status));
+        }else{
+          $(loaderTextId).textContent=`Generating audio… (${status})`;
         }
-      } catch {
-        clearInterval(pollTimer);
-        document.getElementById('loader').classList.add('d-none');
-        alert('Network error while polling.');
       }
-    }, 3000);
-  }
+    }catch{clearInterval(pollTimer);$(loaderId).classList.add('d-none');alert('Polling error');}
+  },3000);
+}
 
-  $('generateButton').addEventListener('click', async () => {
-    const prompt = $('description').value.trim();
-    const title  = $('title').value.trim();
-    const duration = $('durationSlider').value;
-    if (!prompt){ alert('Please enter a description'); return; }
+// --- Generate short track ---
+$('generateButton').addEventListener('click',async()=>{
+  const prompt=$('description').value.trim();
+  if(!prompt){alert('Enter a description');return;}
+  const fd=new FormData();
+  fd.append('prompt',prompt);
+  if($('title').value) fd.append('title',$('title').value);
+  fd.append('duration',$('durationSlider').value);
+  $('loader').classList.remove('d-none');
+  try{
+    // const res=await fetch('/generate-music',{method:'POST',body:fd});
 
-    document.getElementById('loader').classList.remove('d-none');
-    $('loaderText').textContent = 'Creating job…';
+  const res = await fetch('/generate-music', {
+  method: 'POST',
+  headers: { "X-API-Key": "YHYd7W5UyWhd9kE_2Kp_gbPrFeC4-8y6TQaOQujpTH8" },
+  body: fd
+});
 
-    const fd = new FormData();
-    fd.append('prompt', prompt);
-    if (title) fd.append('title', title);
-    fd.append('duration', duration);
 
-    try{
-      const res = await fetch('/generate-music', { method:'POST', body: fd });
-      const result = await res.json();
-      if (!res.ok){
-        throw new Error(result.detail || result.error || 'Server error');
-      }
-      if (result.job && result.job.id){
-        $('npLyrics').textContent = result.job.lyrics || '';
-        $('npTitle').textContent = result.job.title || '';
-        document.getElementById('section-now').classList.remove('d-none');
-        pollJob(result.job.id);
-      } else if (result.track) {
-        document.getElementById('loader').classList.add('d-none');
-        showNowPlaying(result.track);
-        await loadAlbum();
-      } else {
-        throw new Error('Unexpected server response');
-      }
-    } catch (e){
-      console.error(e);
-      document.getElementById('loader').classList.add('d-none');
-      alert('Failed to start generation: ' + e.message);
-    }
-  });
 
-  // ---- Upload local file ----
-  $('btnUpload').addEventListener('click', async () => {
-    const f = $('uploadFile').files[0];
-    if (!f){ alert('Choose an audio file'); return; }
-    const fd = new FormData();
-    fd.append('file', f);
-    if ($('uploadTitle').value)  fd.append('title', $('uploadTitle').value);
-    if ($('uploadArtist').value) fd.append('artist', $('uploadArtist').value);
-    try{
-      const res = await fetch('/api/album/upload', { method:'POST', body: fd });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || data.error || 'Upload failed');
-      await loadAlbum();
-      showNowPlaying(data.track);
-    } catch(e){
-      alert(e.message);
-    }
-  });
+    const result=await res.json();
+    if(!res.ok) throw new Error(result.detail||'Error');
+    if(result.job&&result.job.id) pollJob(result.job.id,'loader','loaderText');
+    else if(result.track){$('loader').classList.add('d-none');showNowPlaying(result.track);await loadAlbum();}
+  }catch(e){$('loader').classList.add('d-none');alert(e.message);}
+});
 
-  // ---- Import by direct URL ----
-  $('btnImport').addEventListener('click', async () => {
-    const url = $('importUrl').value.trim();
-    if (!url){ alert('Enter a direct audio URL'); return; }
-    try{
-      const res = await fetch('/api/album/import_url', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({
-          url,
-          title: $('importTitle').value,
-          artist: $('importArtist').value
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || data.error || 'Import failed');
-      await loadAlbum();
-      showNowPlaying(data.track);
-    } catch(e){
-      alert(e.message);
-    }
-  });
+// --- Compose long form ---
+$('composeButton')?.addEventListener('click',async()=>{
+  const base_prompt=$('composePrompt').value.trim();
+  if(!base_prompt){alert('Enter a theme');return;}
+  const fd=new FormData();
+  fd.append('base_prompt',base_prompt);
+  fd.append('title',$('composeTitle').value);
+  fd.append('total_minutes',$('composeTotal').value);
+  fd.append('section_minutes',$('composeSection').value);
+  fd.append('global_key',$('composeKey').value);
+  fd.append('global_bpm',$('composeBpm').value);
+  $('composeLoader').classList.remove('d-none');
+  try{
+    // const res=await fetch('/api/v1/compose',{method:'POST',body:fd});
+  const res = await fetch('/api/v1/compose', {
+  method: 'POST',
+  headers: { "X-API-Key": "YHYd7W5UyWhd9kE_2Kp_gbPrFeC4-8y6TQaOQujpTH8" },
+  body: fd
+});
+    const result=await res.json();
+    if(!res.ok) throw new Error(result.detail||'Error');
+    if(result.job&&result.job.id) pollJob(result.job.id,'composeLoader','composeLoaderText');
+    else if(result.track){$('composeLoader').classList.add('d-none');showNowPlaying(result.track);await loadAlbum();}
+  }catch(e){$('composeLoader').classList.add('d-none');alert(e.message);}
+});
 
-  // ---- Delete track ----
-  async function deleteTrack(id){
-    if (!confirm('Delete this track?')) return;
-    const res = await fetch(`/api/album/${id}`, { method:'DELETE' });
-    if (res.ok){
-      await loadAlbum();
-      if (currentIndex >= 0){
-        wavesurfer.stop();
-        document.getElementById('section-now').classList.add('d-none');
-      }
-    } else {
-      const data = await res.json().catch(()=>({}));
-      alert('Delete failed: ' + (data.detail || data.error || res.status));
-    }
-  }
+// --- Upload ---
+$('btnUpload').addEventListener('click',async()=>{
+  const f=$('uploadFile').files[0];
+  if(!f){alert('Choose an audio file');return;}
+  const fd=new FormData(); fd.append('file',f);
+  if($('uploadTitle').value) fd.append('title',$('uploadTitle').value);
+  if($('uploadArtist').value) fd.append('artist',$('uploadArtist').value);
+  try{
+    const res=await fetch('/api/album/upload',{method:'POST',body:fd});
+    const data=await res.json();
+    if(!res.ok) throw new Error(data.detail||'Upload failed');
+    await loadAlbum(); showNowPlaying(data.track);
+  }catch(e){alert(e.message);}
+});
 
-  // initial load
-  loadAlbum();
+// --- Import ---
+$('btnImport').addEventListener('click',async()=>{
+  const url=$('importUrl').value.trim();
+  if(!url){alert('Enter a direct audio URL');return;}
+  try{
+    const res=await fetch('/api/album/import_url',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      url,title:$('importTitle').value,artist:$('importArtist').value
+    })});
+    const data=await res.json();
+    if(!res.ok) throw new Error(data.detail||'Import failed');
+    await loadAlbum(); showNowPlaying(data.track);
+  }catch(e){alert(e.message);}
+});
+
+// --- Delete track ---
+async function deleteTrack(id){
+  if(!confirm('Delete this track?')) return;
+  const res=await fetch(`/api/album/${id}`,{method:'DELETE'});
+  if(res.ok){await loadAlbum();wavesurfer.stop();$('section-now').classList.add('d-none');}
+  else{const data=await res.json().catch(()=>({}));alert('Delete failed: '+(data.detail||res.status));}
+}
+
+// --- Init ---
+loadAlbum();
 </script>
+
+
+
+
+
 </body>
 </html>

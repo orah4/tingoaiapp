@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from dotenv import load_dotenv
 from openai import OpenAI
-
+from pydub import AudioSegment
 import requests
 import os, json, uuid, datetime, logging, traceback, mimetypes, shutil, time
 import hmac, hashlib, base64
@@ -70,10 +70,10 @@ def _load_api_keys() -> set[str]:
       - Render Secret File /etc/secrets/PUBLIC_API_KEYS (one or many keys)
     Accepts comma- or newline-separated lists.
     """
-    keys_str = (os.getenv("PUBLIC_API_KEYS") or "").strip()
+    keys_str = (os.getenv("PUBLIC_API_KEY") or "").strip()
     if not keys_str:
         try:
-            with open("/etc/secrets/PUBLIC_API_KEYS", "r", encoding="utf-8") as fh:
+            with open("/etc/secrets/PUBLIC_API_KEY", "r", encoding="utf-8") as fh:
                 keys_str = fh.read().strip()
         except Exception:
             keys_str = ""
@@ -90,7 +90,7 @@ def require_api_key(
 ):
     token = (x_api_key or api_key or "").strip()
     if not API_KEYS:
-        raise HTTPException(status_code=503, detail="API not configured (no PUBLIC_API_KEYS).")
+        raise HTTPException(status_code=503, detail="API not configured (no PUBLIC_API_KEY).")
     if token not in API_KEYS:
         raise HTTPException(status_code=401, detail="Invalid or missing API key.")
     return token
@@ -144,6 +144,89 @@ def sanitize_prompt(p: str) -> str:
     s = s.strip()
     return (f"{s}. Afrobeats vibe inspired by modern Lagos club sound, "
             "original melody & lyrics, no imitation of any specific artist.")
+
+
+# ---------- Long-form helpers (continuity, stitch, loudness) ----------
+try:
+    import pyloudnorm as pyln
+except Exception:
+    pyln = None
+
+try:
+    import librosa
+    import numpy as np
+except Exception:
+    librosa = None
+    np = None
+
+def _load_audiosegment(path: str) -> AudioSegment:
+    return AudioSegment.from_file(path)
+
+def _export_audiosegment(seg: AudioSegment, out_path: str) -> None:
+    seg.export(out_path, format=os.path.splitext(out_path)[1].lstrip(".") or "wav")
+
+def _rms_normalize(seg: AudioSegment, target_dbfs=-14.0) -> AudioSegment:
+    change = target_dbfs - seg.dBFS
+    return seg.apply_gain(change)
+
+def _lufs_normalize(seg: AudioSegment, target_lufs=-14.0) -> AudioSegment:
+    """LUFS normalize if pyloudnorm is available, else fallback to RMS."""
+    if not pyln:
+        return _rms_normalize(seg, target_dbfs=target_lufs)
+    samples = np.array(seg.get_array_of_samples()).astype(np.float32)
+    # Convert to [-1,1]
+    peak = float(1 << (8 * seg.sample_width - 1))
+    y = samples / peak
+    meter = pyln.Meter(seg.frame_rate)  # EBUR128 meter
+    loudness = meter.integrated_loudness(y)
+    gain = target_lufs - loudness
+    return seg.apply_gain(gain)
+
+def _detect_bpm_key(seg: AudioSegment) -> dict:
+    """Crude analysis just for logging/continuity hints."""
+    if not (librosa and np):
+        return {"tempo": None, "key": None}
+    sr = 22050
+    y = np.array(seg.get_array_of_samples()).astype(np.float32)
+    peak = float(1 << (8 * seg.sample_width - 1))
+    y = y / peak
+    y = librosa.resample(y, orig_sr=seg.frame_rate, target_sr=sr)
+    tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+    chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
+    pc = chroma.mean(axis=1)
+    note_names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']
+    key_guess = note_names[int(pc.argmax())]
+    return {"tempo": float(tempo), "key": key_guess}
+
+def crossfade_join(a: AudioSegment, b: AudioSegment, ms=500) -> AudioSegment:
+    """Seamless join with crossfade (avoid hard cuts)."""
+    return a.append(b, crossfade=ms)
+
+def smart_stitch(paths: list[str], crossfade_ms: int = 500) -> AudioSegment:
+    """Load each path, stitch with crossfades, return master AudioSegment."""
+    if not paths:
+        raise RuntimeError("No parts to stitch.")
+    master = _load_audiosegment(paths[0])
+    for p in paths[1:]:
+        nxt = _load_audiosegment(p)
+        master = crossfade_join(master, nxt, ms=crossfade_ms)
+    return master
+
+def normalize_and_export(master: AudioSegment, out_basename: str, lufs=-14.0, album_dir: str = ALBUM_DIR) -> dict:
+    """Normalize to LUFS (or RMS fallback), export WAV + MP3 for convenience."""
+    final = _lufs_normalize(master, target_lufs=lufs)
+    out_wav = os.path.join(album_dir, f"{out_basename}.wav")
+    _export_audiosegment(final, out_wav)
+
+    try:
+        out_mp3 = os.path.join(album_dir, f"{out_basename}.mp3")
+        final.export(out_mp3, format="mp3", bitrate="320k")
+    except Exception:
+        out_mp3 = None
+
+    return {"wav": out_wav, "mp3": out_mp3}
+
+
 
 def album_read() -> list:
     with open(ALBUM_JSON, "r", encoding="utf-8") as f:
@@ -239,6 +322,36 @@ def replicate_get_prediction(pred_id: str) -> dict:
         return g.json()
     except requests.Timeout:
         return {"status": "poll_timeout"}
+    
+
+
+def request_generation_section(section_prompt: str, minutes: int = 4, title: str = "Section") -> str:
+    """
+    Generate one section using the existing Bark on Replicate path.
+    Returns a LOCAL FILE PATH saved into album_dir.
+    Note: Bark doesn't accept duration; we simulate with prompt shaping + multiple calls.
+    """
+    # 1) Create + poll
+    pred_id = replicate_create_prediction(section_prompt)
+    # Minimal polling (reusing your polling function)
+    for _ in range(300):
+        data = replicate_get_prediction(pred_id)
+        if data.get("status") == "succeeded":
+            out = data.get("output")
+            if isinstance(out, list) and out:
+                audio_url = out[0]
+            elif isinstance(out, dict):
+                audio_url = out.get("audio_out")
+            else:
+                raise RuntimeError("Generation succeeded but no audio URL.")
+            # 2) Download locally into album dir
+            return download_to_album(audio_url)
+        elif data.get("status") in ("failed", "canceled"):
+            raise RuntimeError(f"Generation failed: {data}")
+        time.sleep(2)
+    raise TimeoutError("Section generation timed out")
+
+
 
 # ---------- Download helpers ----------
 def infer_ext_from_headers_or_url(ctype: str, url: str) -> str:
@@ -282,6 +395,93 @@ def stream_import_to_album(url: str, max_mb: int = 64) -> str:
                     raise RuntimeError(f"File too large (> {max_mb} MB).")
                 f.write(chunk)
     return path
+
+
+
+
+
+def build_section_prompt(base_prompt: str, section_name: str, energy: str, notes: str, global_key="A minor", global_bpm=92):
+    clean = sanitize_prompt(base_prompt)
+    return (
+        f"{clean} | Long-form composition — {section_name}. "
+        f"Keep same timbre/motif and overall mix aesthetic. "
+        f"Key: {global_key}. Tempo: {global_bpm} BPM. Energy shift: {energy}. "
+        f"Section focus: {notes}. Avoid abrupt key/tempo changes. Natural ending for crossfade."
+    )
+
+def compose_longform(
+    base_prompt: str,
+    total_minutes: int = 20,
+    section_minutes: int = 4,
+    global_key: str = "A minor",
+    global_bpm: int = 92,
+    energy_curve: list[str] = None,
+    notes_per_section: list[str] = None,
+    crossfade_ms: int = 500,
+    lufs: float = -14.0,
+    title: str = "Longform Suite",
+) -> dict:
+    """
+    1) Splits total_length into N sections
+    2) Generates N audio files via Bark (or provider you swap in)
+    3) Stitches with crossfades
+    4) Loudness-normalizes; exports WAV/MP3
+    5) Writes album.json entry; returns track object
+    """
+    if total_minutes < 6:
+        raise HTTPException(status_code=400, detail="total_minutes should be >= 6 for long-form")
+
+    n_sections = max(2, int(round(total_minutes / max(2, section_minutes))))
+    sections = [f"Part {i+1}" for i in range(n_sections)]
+
+    if energy_curve is None:
+        base = ["+0","+1","+2","+3","+2","+1","-1"]
+        energy_curve = [base[min(i, len(base)-1)] for i in range(n_sections)]
+    if notes_per_section is None:
+        notes_per_section = ["introduce motif", "develop motif", "add percussion and pads",
+                             "counter-melody", "build intensity", "climax elements", "gentle resolution"]
+        while len(notes_per_section) < n_sections:
+            notes_per_section.append("variation on prior ideas")
+
+    logger.info(f"Composing longform: sections={n_sections}, minutes≈{total_minutes}")
+
+    local_paths = []
+    for i, name in enumerate(sections):
+        prompt_i = build_section_prompt(
+            base_prompt, name, energy_curve[i], notes_per_section[i],
+            global_key=global_key, global_bpm=global_bpm
+        )
+        logger.info("Gen %s: %s", name, prompt_i[:120])
+        part_path = request_generation_section(prompt_i, minutes=section_minutes, title=f"{title} — {name}")
+        try:
+            meta = _detect_bpm_key(_load_audiosegment(part_path))
+            logger.info("Detected %s: tempo=%s key=%s", name, meta.get("tempo"), meta.get("key"))
+        except Exception:
+            pass
+        local_paths.append(part_path)
+
+    master_seg = smart_stitch(local_paths, crossfade_ms=crossfade_ms)
+    base_name = f"{uuid.uuid4().hex}_{title.replace(' ', '_')[:20]}"
+    exports = normalize_and_export(master_seg, base_name, lufs=lufs, album_dir=ALBUM_DIR)
+
+    public_file = os.path.basename(exports["mp3"] or exports["wav"])
+    public_url = f"/album/{public_file}"
+    track_entry = {
+        "id": uuid.uuid4().hex,
+        "title": title,
+        "artist": "",
+        "lyrics": "",
+        "file": public_file,
+        "url": public_url,
+        "created_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "source": "longform-bark",
+        "parts": [os.path.basename(p) for p in local_paths],
+        "meta": {"key": global_key, "bpm": global_bpm, "sections": n_sections}
+    }
+    append_to_album(track_entry)
+    return {"track": track_entry, "exports": exports, "parts": local_paths}
+
+
 
 # ---------- Basic pages & album listing ----------
 @app.get("/")
@@ -362,6 +562,8 @@ def start_generation_job(prompt: str, title: Optional[str] = None, duration: int
     jobs[job_id] = job
     jobs_write(jobs)
     return job
+
+
 
 # ---------- UI routes for generation ----------
 @app.post("/generate-music")
@@ -637,6 +839,48 @@ def api_job(job_id: str):
         raise HTTPException(status_code=500, detail=job.get("error", job["status"]))
     else:
         return {"job": job}
+    
+
+
+
+@api.post("/compose", dependencies=[Depends(require_api_key)])
+def api_compose(
+    base_prompt: str = Form(..., description="High-level theme/lyrics seed (will be sanitized)"),
+    title: str = Form("Odyssey Suite"),
+    total_minutes: int = Form(20, ge=6, le=60),
+    section_minutes: int = Form(4, ge=2, le=8),
+    global_key: str = Form("A minor"),
+    global_bpm: int = Form(92, ge=50, le=180),
+    crossfade_ms: int = Form(500, ge=0, le=5000),
+    lufs: float = Form(-14.0),
+):
+    """
+    Generate a seamless 15–30 min (or longer) piece by chaining sections,
+    stitching with crossfades, and loudness-normalizing.
+    Returns a single album track with downloadable/streamable URL.
+    """
+    try:
+        result = compose_longform(
+            base_prompt=base_prompt,
+            total_minutes=total_minutes,
+            section_minutes=section_minutes,
+            global_key=global_key,
+            global_bpm=global_bpm,
+            crossfade_ms=crossfade_ms,
+            lufs=lufs,
+            title=title
+        )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Compose error: %s\n%s", e, traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+
 
 @api.get("/tracks", dependencies=[Depends(require_api_key)])
 def api_tracks(request: Request, ttl: int = Query(3600, ge=60, le=86400), signed: bool = Query(False)):

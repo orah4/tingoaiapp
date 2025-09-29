@@ -4,6 +4,7 @@
 __pycache__/
 *.pyc
 aipptingo/
+# album/
 app12.py/
 "@ | Set-Content -Encoding ASCII .gitignore
 

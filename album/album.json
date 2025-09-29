@@ -58,5 +58,27 @@
     "url": "/album/1da392fe91634331a53054a4c2bd6984.mp3",
     "created_at": "2025-09-24T22:24:25.597604Z",
     "source": "upload"
+  },
+  {
+    "id": "311eec23ed284522be47a3506ee1c291",
+    "title": "Odyssey Suite",
+    "artist": "",
+    "lyrics": "",
+    "file": "d645f62f890246668d993a572739cdd6_Odyssey_Suite.mp3",
+    "url": "/album/d645f62f890246668d993a572739cdd6_Odyssey_Suite.mp3",
+    "created_at": "2025-09-28T19:50:11.069716Z",
+    "source": "longform-bark",
+    "parts": [
+      "119901f689504826a8e7aee8e1fda697.wav",
+      "13a16aed717c4d1fb1cb9fa5abc0c3ae.wav",
+      "77e8ec489bc54a50bd0e2a937a6b382d.wav",
+      "af4f57c952c645e7b7f7d97842c9847f.wav",
+      "4b799ac33ed9439d9fbba50e331c1bf4.wav"
+    ],
+    "meta": {
+      "key": "A minor",
+      "bpm": 92,
+      "sections": 5
+    }
   }
 ]
